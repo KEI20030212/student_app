@@ -91,7 +91,7 @@ def main():
     # 全画面共通のヘッダー
     st.markdown(f"""
     <div style="background-color:#1E90FF;padding:10px;border-radius:10px;margin-bottom:20px;">
-        <h2 style="color:white;text-align:center;margin:0;">🌟 Dr.関塾(田端新町校) 統合管理システム <span style="font-size:0.5em;background-color:white;color:#1E90FF;padding:2px 8px;border-radius:5px;">{st.session_state['username']} モード</span></h2>
+        <h2 style="color:white;text-align:center;margin:0;">🌟 統合管理システム(改良版) <span style="font-size:0.5em;background-color:white;color:#1E90FF;padding:2px 8px;border-radius:5px;">{st.session_state['username']} モード</span></h2>
     </div>
     """, unsafe_allow_html=True)
 
