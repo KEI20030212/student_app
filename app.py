@@ -50,7 +50,7 @@ TEACHER_PASS = "teacher123"
 # 🔒 ログイン画面
 # --------------------------------------------------
 def login_screen():
-    st.markdown("<h1 style='text-align: center; color: #1E90FF;'>🌟 Dr.関塾(田端新町校) 統合管理システム</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1E90FF;'>🌟 統合管理システム(改良版)</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("login_form"):
