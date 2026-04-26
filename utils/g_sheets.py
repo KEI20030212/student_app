@@ -22,7 +22,6 @@ def get_jst_now():
 # --------------------------------------------------
 SPREADSHEET_ID = '1fEyisztEGteS22kF1lUlsXiwjmMh1cR7MiXU6aDiZEA'
 @st.cache_resource
-@st.cache_data(ttl=300)
 def get_gc_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     
