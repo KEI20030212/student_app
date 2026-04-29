@@ -350,6 +350,8 @@ def render_multi_input_page(textbook_master):
                 if st.button("🚀 全員の記録をまとめて保存する", type="primary", use_container_width=True):
                     with st.status("データを保存中...", expanded=True) as status:
                         for data in input_data_list:
+                            # 🌟 デバッグ用：ここで画面に中身を強制出力！
+                            st.write("【確認用】今から保存するデータ:", data)
                             
                             # 1. いつも通りの授業記録を保存
                             robust_api_call(
