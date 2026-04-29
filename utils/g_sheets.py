@@ -20,7 +20,7 @@ def get_jst_now():
 # --------------------------------------------------
 # ⚙️ 設定（デザインとファイル連携）
 # --------------------------------------------------
-SPREADSHEET_ID = '1tnhK-rvf_cSXmuY9REkD_cK6Wg4XP7alc1UHTpSRrv4'
+SPREADSHEET_ID = '1fEyisztEGteS22kF1lUlsXiwjmMh1cR7MiXU6aDiZEA'
 @st.cache_resource
 def get_gc_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
