@@ -20,7 +20,7 @@ def get_jst_now():
 # --------------------------------------------------
 # ⚙️ 設定（デザインとファイル連携）
 # --------------------------------------------------
-SPREADSHEET_ID = '1fEyisztEGteS22kF1lUlsXiwjmMh1cR7MiXU6aDiZEA'
+SPREADSHEET_ID = '1tnhK-rvf_cSXmuY9REkD_cK6Wg4XP7alc1UHTpSRrv4'
 @st.cache_resource
 def get_gc_client():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -28,34 +28,98 @@ def get_gc_client():
     secret_dict = json.loads(st.secrets["gcp_service_account_json"])
     credentials = Credentials.from_service_account_info(secret_dict, scopes=scopes)
     return gspread.authorize(credentials)
-#改善後
-def load_all_class_logs():
-    """全生徒の授業データを『授業ログ統合』シートから一括で取得する"""
-    gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet("授業ログ統合")
-        
-        records = worksheet.get_all_records()
-        df = pd.DataFrame(records)
-        
-        if not df.empty and '終了ページ' in df.columns:
-            # 終了ページから数字だけを取り出して「ページ数」カラムを作る（既存ロジックの移植）
-            df['ページ数'] = df['終了ページ'].astype(str).str.extract(r'(\d+)').astype(float)
-            
-        return df
-    except Exception as e:
-        # エラーは握りつぶさず api_guard に検知させる
-        raise e
 
-#改善前
+#改良版コード
+@st.cache_data(ttl=600) # 10分間キャッシュ
+def get_all_logs():
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("授業ログ統合")
+    data = ws.get_all_records()
+    return pd.DataFrame(data)
+
+def get_student_logs(student_name):
+    df = get_all_logs()
+    if df.empty:
+        return df
+    # 特定の生徒名でフィルタリング
+    student_df = df[df["名前"] == student_name]
+    return student_df
+
+def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定"):
+    # 🌟 第一引数に student_id を追加しました
+    gc = get_gc_client() # 前回の cache_resource を使ったクライアント取得
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報")
+    
+    # 全データを一気に取得（API節約のため）
+    all_data = ws.get_all_values()
+    header = all_data[0]
+    
+    # 必要な列がなければ追加（ここは元のロジックを継承）
+    required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分']
+    for col in required_cols:
+        if col not in header:
+            ws.update_cell(1, len(header) + 1, col)
+            header.append(col)
+
+    # 1. 生徒IDがA列（index 0）のどこにあるか探す
+    row_index = -1
+    for i, row in enumerate(all_data):
+        if row[0] == str(student_id): # IDが一致するか
+            row_index = i + 1 # 1-based index
+            break
+
+    # 保存するデータの辞書を作成
+    # ヘッダー名と引数の値を紐付けます
+    row_dict = {
+        '生徒ID': str(student_id),
+        '生徒名': name,
+        '学年': grade,
+        '学校名': school,
+        '志望校・目的': target,
+        '受講科目': subjects,
+        '能力': ability,
+        'やる気': motivation,
+        '内申点': naishin,
+        '最新偏差値': dev_score,
+        '宿題履行率': hw_rate,
+        '受験区分': exam_status,
+        '学校区分': school_type
+    }
+
+    # ヘッダーの順番通りにリストを作成
+    row_to_save = [row_dict.get(col, "") for col in header]
+
+    if row_index != -1:
+        # 🌟 既存生徒の更新：1行まるごと一気に更新（update_cellを何度も呼ばない！）
+        # range は "A2:M2" のような形式
+        range_label = f"A{row_index}:{gspread.utils.rowcol_to_a1(row_index, len(header))}"
+        ws.update(range_name=range_label, values=[row_to_save])
+        print(f"ID:{student_id} のデータを更新しました。")
+    else:
+        # 🌟 新規生徒の追加
+        ws.append_row(row_to_save)
+        print(f"ID:{student_id} を新規登録しました。")
+        
+    st.cache_data.clear()
+
+@st.cache_data(ttl=3600) 
+def get_student_master():
+    sh = get_gspread_client().open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("生徒名簿")
+    df = pd.DataFrame(ws.get_all_records())
+    # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
+    return df
+
+#改良前
 @st.cache_data(ttl=60)
 def get_all_student_names():
     gc = get_gc_client()
     try:
         sh = gc.open_by_key(SPREADSHEET_ID)
         ensure_global_sheets(sh)
-        exclude = ["自習記録", "テキスト情報一覧", "設定_掲示板", "成績_定期テスト", "設定_小テスト一覧", "設定_生徒情報", "設定_座席表", "講師マスタ", "設定_アカウント", "給与公開用データ", "連絡_メッセージ", "小テスト記録", "学校課題管理", "請求管理", "料金マスタ", "固定費設定"]
+        exclude = ["自習記録", "テキスト情報一覧", "設定_掲示板", "成績_定期テスト", "設定_小テスト一覧", "設定_生徒情報", "設定_座席表", "講師マスタ", "設定_アカウント", "給与公開用データ", "連絡_メッセージ", "小テスト記録", "学校課題管理", "請求管理", "料金マスタ", "固定費設定", "授業ログ統合"]
         return [ws.title for ws in sh.worksheets() if ws.title not in exclude]
     except:
         return []
@@ -238,20 +302,24 @@ def update_student_homework_rate(name):
 def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc, 
                     dev_eng=None, dev_math=None, dev_jpn=None, dev_sci=None, dev_soc=None, 
                     dev_3=None, dev_5=None, 
-                    pe=None, tech=None, home=None, mus=None, art=None, is_naishin=False): # 🎨 artを追加
+                    pe=None, tech=None, home=None, mus=None, art=None, is_naishin=False,
+                    att_eng=None, att_math=None, att_jpn=None, att_sci=None, att_soc=None, # 🌟 態度を追加
+                    att_pe=None, att_gika=None, att_art=None, att_mus=None):
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("成績_定期テスト")
     
     header = ws.row_values(1)
     
-    # 🌟 「美術」をテスト用に追加、内申用は「技術 内申」「家庭 内申」を「技家 内申」に変更
+    # 🌟 「態度」用のカラムを required_cols に追加
     required_cols = [
         '偏差値_英語', '偏差値_数学', '偏差値_国語', '偏差値_理科', '偏差値_社会', 
         '英語 偏差値', '数学 偏差値', '国語 偏差値', '理科 偏差値', '社会 偏差値', 
-        '偏差値_3科', '偏差値_5科', '保体', '技術', '家庭', '美術', '音楽', '9科総合', # 🎨 美術を追加
+        '偏差値_3科', '偏差値_5科', '保体', '技術', '家庭', '美術', '音楽', '9科総合', 
         '英語 内申', '数学 内申', '国語 内申', '理科 内申', '社会 内申',
-        '保体 内申', '技家 内申', '美術 内申', '音楽 内申' # 🛠️ 技家 内申、美術 内申を追加
+        '保体 内申', '技家 内申', '美術 内申', '音楽 内申',
+        '英語 態度', '数学 態度', '国語 態度', '理科 態度', '社会 態度', # 🌟 追加
+        '保体 態度', '技家 態度', '美術 態度', '音楽 態度' # 🌟 追加
     ]
     missing_cols = [col for col in required_cols if col not in header]
     
@@ -267,6 +335,7 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
     }
 
     if is_naishin:
+        # 🌟 UIのセレクトボックスの未選択 ("") を考慮し、値がなければ "-" を入れる
         row_dict.update({
             '英語 内申': eng if eng is not None else "-",
             '数学 内申': math_score if math_score is not None else "-",
@@ -274,13 +343,21 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
             '理科 内申': sci if sci is not None else "-",
             '社会 内申': soc if soc is not None else "-",
             '保体 内申': pe if pe is not None else "-",
-            '技家 内申': tech if tech is not None else "-", # 🛠️ view側から技家の値が tech の位置に渡ってきます
-            '美術 内申': art if art is not None else "-",   # 🎨 追加
-            '音楽 内申': mus if mus is not None else "-"
+            '技家 内申': tech if tech is not None else "-", 
+            '美術 内申': art if art is not None else "-",  
+            '音楽 内申': mus if mus is not None else "-",
+            '英語 態度': att_eng if att_eng else "-",   # 🌟 追加
+            '数学 態度': att_math if att_math else "-", # 🌟 追加
+            '国語 態度': att_jpn if att_jpn else "-",   # 🌟 追加
+            '理科 態度': att_sci if att_sci else "-",   # 🌟 追加
+            '社会 態度': att_soc if att_soc else "-",   # 🌟 追加
+            '保体 態度': att_pe if att_pe else "-",     # 🌟 追加
+            '技家 態度': att_gika if att_gika else "-", # 🌟 追加
+            '美術 態度': att_art if att_art else "-",   # 🌟 追加
+            '音楽 態度': att_mus if att_mus else "-"    # 🌟 追加
         })
     else:
         total_5 = sum([x for x in [eng, math_score, jpn, sci, soc] if x is not None])
-        # 🎨 9科総合の計算に art を追加
         total_9 = total_5 + sum([x for x in [pe, tech, home, mus, art] if x is not None]) if test_type == "期末テスト" else "-"
 
         row_dict.update({
@@ -304,7 +381,7 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
             '偏差値_5科': dev_5 if dev_5 is not None else "-",
             '保体': pe if pe is not None else "-", '技術': tech if tech is not None else "-",
             '家庭': home if home is not None else "-", '音楽': mus if mus is not None else "-",
-            '美術': art if art is not None else "-", # 🎨 追加
+            '美術': art if art is not None else "-", 
             '9科総合': total_9
         })
     
@@ -387,6 +464,8 @@ def get_quiz_maker_sheets():
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_小テスト一覧")
+    
+    # get_all_records() は1行目を見出し(キー)として取得してくれます
     records = ws.get_all_records()
 
     quiz_data = {}
@@ -402,16 +481,22 @@ def get_quiz_maker_sheets():
                 # 空文字 "" などで変換に失敗した場合は100点とする
                 full_marks = 100.0 
                 
+            # 🌟 【ここを追加！】スプレッドシートから「用紙サイズ」を取得する
+            # ※「用紙サイズ」という列がない、または空欄の場合は "A4" にします
+            raw_size = str(row.get('用紙サイズ', 'A4')).strip()
+            paper_size = raw_size if raw_size else "A4"
+                
             quiz_data[name] = {
                 "id": str(row.get('スプレッドシートID', '')),
-                "full_marks": full_marks # 数値化したものをセット
+                "full_marks": full_marks, # 数値化したものをセット
+                "サイズ": paper_size      # 🌟 ここで取得したサイズも一緒に保存！
             }
     return quiz_data
-def add_quiz_maker_sheet(test_name, sheet_id, full_marks): # 🌟 ここに full_marks を追加！
+def add_quiz_maker_sheet(test_name, sheet_id, full_marks, paper_size="A4"): # 🌟 ここに full_marks を追加！
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_小テスト一覧")
-    ws.append_row([test_name, sheet_id, full_marks])
+    ws.append_row([test_name, sheet_id, full_marks, paper_size])
     st.cache_data.clear()
 def delete_quiz_maker_sheet(test_name):
     gc = get_gc_client()
@@ -420,42 +505,7 @@ def delete_quiz_maker_sheet(test_name):
     cell = ws.find(test_name, in_column=1)
     if cell: ws.delete_rows(cell.row)
     st.cache_data.clear()
-def update_student_info(name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate):
-    gc = get_gc_client()
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet("設定_生徒情報")
-    
-    header = ws.row_values(1)
-    required_cols = ['内申点', '最新偏差値', '宿題履行率']
-    missing_cols = [col for col in required_cols if col not in header]
-    
-    if missing_cols:
-        if len(header) + len(missing_cols) > ws.col_count:
-            ws.add_cols(len(missing_cols) + 3) 
-        for col in missing_cols:
-            ws.update_cell(1, len(header) + 1, col)
-            header.append(col)
-
-    cell = ws.find(name, in_column=1)
-    if cell:
-        ws.update_cell(cell.row, 2, grade)
-        ws.update_cell(cell.row, 3, school)
-        ws.update_cell(cell.row, 4, target)
-        ws.update_cell(cell.row, 5, subjects)
-        ws.update_cell(cell.row, 6, ability)
-        ws.update_cell(cell.row, 7, motivation)
-        ws.update_cell(cell.row, header.index('内申点') + 1, naishin)
-        ws.update_cell(cell.row, header.index('最新偏差値') + 1, dev_score)
-        ws.update_cell(cell.row, header.index('宿題履行率') + 1, hw_rate)
-    else:
-        row_dict = {
-            header[0]: name, header[1]: grade, header[2]: school, 
-            header[3]: target, header[4]: subjects, header[5]: ability, header[6]: motivation,
-            '内申点': naishin, '最新偏差値': dev_score, '宿題履行率': hw_rate
-        }
-        row_to_append = [row_dict.get(col, "") for col in header]
-        ws.append_row(row_to_append)
-    st.cache_data.clear()
+        
 def ensure_global_sheets(sh):
     titles = [ws.title for ws in sh.worksheets()]
     if "設定_掲示板" not in titles:
@@ -1286,28 +1336,42 @@ def get_student_quiz_records(student_name):
 
 def get_quiz_master_dict():
     """
-    「設定_小テスト一覧」シートから、テスト名と満点の対応表を取得する
+    「設定_小テスト一覧」シートから、テスト名と満点・用紙サイズの対応表を取得する
     """
     try:
         gc = get_gc_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
         worksheet = sh.worksheet("設定_小テスト一覧")
         
+        # get_all_values() はデータをリストの形で取得します
         all_records = worksheet.get_all_values()
         master_dict = {}
         
         # 1行目（ヘッダー）を飛ばしてループ
-        # A列:テキスト名, B列:単元名, C列:満点 と仮定
+        # A列:テキスト名(row[0]), B列:単元名(row[1]), C列:満点(row[2]), D列:用紙サイズ(row[3]) と仮定
         for row in all_records[1:]:
             if len(row) >= 3:
                 # 記録シート側の quiz_name と合わせるため「テキスト_単元」をキーにする
                 quiz_key = f"{row[0]}_{row[1]}"
+                
+                # C列（満点）の取得
                 try:
                     full_marks = float(row[2])
                 except ValueError:
                     full_marks = 100 # 数字でない場合はデフォルト100点
+                    
+                # 🌟 【ここを追加！】D列（用紙サイズ）の取得
+                # 行のデータが4つ以上ある ＆ 空欄じゃない場合はそのサイズを使い、それ以外は「A4」にする安全策
+                if len(row) >= 4 and row[3].strip() != "":
+                    paper_size = row[3].strip()
+                else:
+                    paper_size = "A4"
                 
-                master_dict[quiz_key] = {"full_marks": full_marks}
+                # 🌟 【ここを変更！】辞書の中に "サイズ" も一緒に保存する
+                master_dict[quiz_key] = {
+                    "full_marks": full_marks,
+                    "サイズ": paper_size
+                }
                 
         return master_dict
     except Exception as e:
@@ -1438,7 +1502,9 @@ def get_student_master_data():
         for _, row in df.iterrows():
             master_dict[row["生徒名"]] = {
                 "学年": row["学年"],
+                "学校区分": row["学校区分"],
                 "契約コース": row.get("契約コース", "未設定"),
+                "受験区分": row.get("受験区分", "未設定"),
                 "特別割引コマ": row.get("特別割引(コマ)", 0) # 🌟追加
             }
         return master_dict
