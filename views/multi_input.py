@@ -48,9 +48,6 @@ def render_multi_input_page(textbook_master):
         st.session_state["student_master"] = robust_api_call(get_student_master)
     student_df = st.session_state["student_master"]
     
-    # 🌟 一時的な確認用コード
-    st.write("スプレッドシートから読み込めた列名:", student_df.columns.tolist())
-    st.stop() # ここでプログラムを止める
     # 選択肢用のリストを作成 "S001 - 山田太郎" のような形式
     student_options = (student_df['生徒ID'].astype(str) + " - " + student_df['生徒名']).tolist()
 
