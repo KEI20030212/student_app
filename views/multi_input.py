@@ -354,8 +354,8 @@ def render_multi_input_page(textbook_master):
                             # 1. いつも通りの授業記録を保存
                             robust_api_call(
                                 save_to_spreadsheet,
-                                name=data.get("name", ""),
                                 student_id=data.get("student_id", ""),
+                                name=data.get("name", ""),
                                 subject=data.get("subject", ""),
                                 text_name=data.get("text_name_str", data.get("text_name", "")),
                                 advanced_p=data.get("advanced_p_str", ""),
