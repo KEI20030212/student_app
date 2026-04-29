@@ -113,6 +113,33 @@ def get_student_master():
     # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
     return df
 
+def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
+    # 🌟 生徒IDも表示するようにプリント文をパワーアップ！
+    print(f"🌟🌟🌟 保存処理スタート！ ID:{student_id} 生徒名:{name} 🌟🌟🌟") 
+    
+    gc = get_gc_client()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        
+        # 🌟 革命ポイント！「授業ログ統合」シートだけを狙い撃ち！
+        # （生徒ごとのシートを探したり作ったりする処理は全カットで超高速化）
+        worksheet = sh.worksheet("授業ログ統合")
+        
+        date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
+        
+        # 🚨 超重要ポイント！
+        # リストの2番目に「student_id」を追加しました！
+        if not quiz_records:
+            worksheet.append_row([date_str, student_id, name, subject, text_name, advanced_p, "-", "-", "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
+        else:
+            for q in quiz_records:
+                worksheet.append_row([date_str, student_id, name, subject, text_name, advanced_p, f"第{q['unit']}章", q['score'], "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
+        return True
+    except Exception as e:
+        import streamlit as st
+        st.error(f"🚨 スプレッドシートの書き込みでエラーが発生しました: {e}")
+        return False
+
 #改良前
 @st.cache_data(ttl=60)
 def get_all_student_names():
@@ -190,45 +217,7 @@ def get_last_page_from_sheet(name):
         # 新しいデータ（「P.10〜20」など）や「-」なら、無理に数字にせずそのまま文字として返す
         return str(last_page)
     return 0
-def save_to_spreadsheet(name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
-    print(f"🌟🌟🌟 保存処理スタート！ 生徒名: {name} 🌟🌟🌟") # 👈 この1行を追加！
-    gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        existing_sheets = [ws.title for ws in sh.worksheets()]
-        
-        # 🌟 追加：昔の列名に加えて、新メンバー（遅刻時間、集中力、反応）を追加します！
-        new_columns = ["宿題", "担当講師", "授業形態", "出欠", "授業コマ", "アドバイス", "保護者への連絡", "次回への引継ぎ", "出した宿題P", "やった宿題P", "やる気ランク", "次回の宿題テキスト", "次回の宿題ページ数", "遅刻時間", "集中力", "反応"]
-        
-        if name in existing_sheets:
-            worksheet = sh.worksheet(name)
-            header = worksheet.row_values(1)
-            # 先生の神コード！足りない列名があれば自動で右に追加
-            for col_name in new_columns:
-                if col_name not in header:
-                    worksheet.update_cell(1, len(header) + 1, col_name)
-                    header.append(col_name)
-        else:
-            worksheet = sh.add_worksheet(title=name, rows="100", cols="20")
-            # 新しい生徒の時のヘッダーにも、右端に新メンバーを追加！
-            header = ["日時", "名前", "科目", "テキスト", "終了ページ", "単元", "点数", "宿題", "担当講師", "授業形態", "出欠", "授業コマ", "アドバイス", "保護者への連絡", "次回への引継ぎ", "出した宿題P", "やった宿題P", "やる気ランク", "次回の宿題テキスト", "次回の宿題ページ数", "遅刻時間", "集中力", "反応"]
-            worksheet.append_row(header)
-        
-        date_str = date.strftime("%Y/%m/%d")
-        
-        # 🚨 超重要ポイント！
-        # 列がズレないように、昔「宿題 (hw_status)」が入っていた8番目の場所にはダミーの "-" を入れます！
-        # 🌟 右端に late_time, concentration, reaction を追加して書き込みます！
-        if not quiz_records:
-            worksheet.append_row([date_str, name, subject, text_name, advanced_p, "-", "-", "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
-        else:
-            for q in quiz_records:
-                worksheet.append_row([date_str, name, subject, text_name, advanced_p, f"第{q['unit']}章", q['score'], "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
-        return True
-    except Exception as e:
-        import streamlit as st
-        st.error(f"🚨 スプレッドシートの書き込みでエラーが発生しました: {e}")
-        return False
+
 def update_student_homework_rate(name):
     from utils.calc_logic import calculate_quiz_points, calculate_motivation_rank
     
