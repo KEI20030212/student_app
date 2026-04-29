@@ -333,6 +333,7 @@ def render_multi_input_page(textbook_master):
                                     next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{i}")
 
                                     input_data_list.append({
+                                        "student_id": student_id,
                                         "name": name, "subject": subject, "text_name": text_name_str,
                                         "advanced_p": advanced_p_str, "quiz_records": quiz_records, 
                                         "w_nums_for_sheet": w_nums_for_sheet, "attendance": attendance,
