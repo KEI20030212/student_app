@@ -106,8 +106,9 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
 
 @st.cache_data(ttl=3600) 
 def get_student_master():
-    sh = get_gspread_client().open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet("生徒名簿")
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報")
     df = pd.DataFrame(ws.get_all_records())
     # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
     return df
