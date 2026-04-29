@@ -110,7 +110,7 @@ def render_multi_input_page(textbook_master):
             st.info("👆 まずは「担当講師」と「授業コマ」を選択してください。")
         else:
             num_students = int(class_type.split(":")[1])
-            options = ["🆕 新規登録"] + student_names
+            options = ["🆕 新規登録"] + student_options
             st.divider()
             cols = st.columns(num_students)
             input_data_list = []
@@ -440,7 +440,7 @@ def render_multi_input_page(textbook_master):
         with st.container(border=True):
             st.write("📚 **自習記録の入力（一括登録モード）**")
             
-            ss_options = ["🆕 新規登録"] + student_names
+            ss_options = ["🆕 新規登録"] + student_options
             ss_name = st.selectbox("👤 生徒を選択", ss_options, index=None, placeholder="生徒を選択", key="ss_name")
             
             if ss_name == "🆕 新規登録": 
