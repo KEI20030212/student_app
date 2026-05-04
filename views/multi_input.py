@@ -36,10 +36,55 @@ def robust_api_call(func, *args, max_retries=3, **kwargs):
             # エラー発生時は待機時間を倍に増やして再試行 (Exponential Backoff: 1秒, 2秒...)
             time.sleep(2 ** attempt)
 
+DRAFT_PREFIXES = (
+    "record_type", "class_date", "class_type", 
+    "sb_", "sel_student_", "new_name_", "att_", "late_", "sub_", "texts_", "new_usage_text_", # 👈 sel_student_ に対応！
+    "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_", "w_",
+    "done_start_", "done_end_", "conc_", "reac_", "hw_text_", "new_hw_text_", 
+    "n_start_", "n_end_", "advc_", "p_msg_", "next_h_",
+    "ss_", "d_", "s_", "e_", "b_", "m_"
+)
+
 def render_multi_input_page(textbook_master):
+    # ==========================================
+    # 🌟 新機能: 画面を追従するサイドバー一時保存メニュー
+    # ==========================================
+    with st.sidebar:
+        st.header("💾 一時保存メニュー")
+        st.caption("ページ移動前に保存すると入力内容が消えません！")
+        
+        c1, c2 = st.columns(2)
+        if c1.button("💾 保存", use_container_width=True):
+            draft = {}
+            # 現在のセッションステートから、入力フォームのデータだけを抽出して退避
+            for k, v in st.session_state.items():
+                if k.startswith(DRAFT_PREFIXES):
+                    draft[k] = v
+            st.session_state["draft_data"] = draft
+            st.success("一時保存しました！")
+            
+        if c2.button("📂 復元", use_container_width=True):
+            if "draft_data" in st.session_state and st.session_state["draft_data"]:
+                # 退避しておいたデータをセッションステートに戻す
+                for k, v in st.session_state["draft_data"].items():
+                    st.session_state[k] = v
+                st.success("復元しました！")
+                time.sleep(1)
+                st.rerun() # 画面を再描画して復元を反映
+            else:
+                st.warning("保存データがありません")
+                
+        if st.button("🗑️ 保存データを削除", use_container_width=True):
+            if "draft_data" in st.session_state:
+                del st.session_state["draft_data"]
+                st.success("削除しました！")
+                time.sleep(1)
+                st.rerun()
+        st.divider()
+    
     st.header("📝 授業・自習記録の入力")
 
-    record_type = st.radio("✍️ 記録の種類を選択してください", ["📖 授業", "📝 自習"], horizontal=True)
+    record_type = st.radio("✍️ 記録の種類を選択してください", ["📖 授業", "📝 自習"], horizontal=True, key="record_type")
     st.divider()
 
     # 生徒名簿（IDと名前が入ったデータフレーム）を取得するように変更
@@ -77,7 +122,7 @@ def render_multi_input_page(textbook_master):
     if record_type == "📖 授業":
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.5, 2])
-            date = c1.date_input("授業日", datetime.date.today())
+            date = c1.date_input("授業日", datetime.date.today(), key="class_date")
             
             # 💡 改善: 「--選択--」を排除！ index=None と placeholder を使って美しく！
             teacher_name = c2.selectbox(
@@ -88,7 +133,7 @@ def render_multi_input_page(textbook_master):
                 key="sb_teacher"
             )
             
-            class_type = c3.radio("👥 授業形態", ["1:1", "1:2", "1:3"], horizontal=True)
+            class_type = c3.radio("👥 授業形態", ["1:1", "1:2", "1:3"], horizontal=True, key="class_type")
             
             time_slots = [
                 "Aコマ目 (9:30~11:00)", "Bコマ目 (11:10~12:40)",
@@ -351,8 +396,6 @@ def render_multi_input_page(textbook_master):
                 if st.button("🚀 全員の記録をまとめて保存する", type="primary", use_container_width=True):
                     with st.status("データを保存中...", expanded=True) as status:
                         for data in input_data_list:
-                            # 🌟 デバッグ用：ここで画面に中身を強制出力！
-                            st.write("【確認用】今から保存するデータ:", data)
                             
                             # 1. いつも通りの授業記録を保存
                             robust_api_call(
@@ -407,6 +450,10 @@ def render_multi_input_page(textbook_master):
                         status.update(label="保存完了！", state="complete", expanded=False)
 
                     st.success(f"✅ {num_students}名全員の記録を保存しました！")
+                    
+                    # 🌟 改善: 無事に保存完了したら、一時保存のデータも綺麗に消去する
+                    if "draft_data" in st.session_state:
+                        del st.session_state["draft_data"]
                     
                     st.cache_data.clear()
                     time.sleep(2)
