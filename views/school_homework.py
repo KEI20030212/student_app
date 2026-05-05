@@ -2,12 +2,16 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import time
+
+# 🌟 変更: 古い関数を削り、get_student_master を追加！
 from utils.g_sheets import (
     load_school_homework_data, 
     update_homework_status, 
     add_school_homework_multi, 
-    get_all_student_grades
+    get_student_master
 )
+
+from utils.api_guard import robust_api_call
 
 def render_school_homework_page():
     col_h, col_r = st.columns([0.8, 0.2])
@@ -15,20 +19,22 @@ def render_school_homework_page():
         st.header("🎒 学校課題管理")
     with col_r:
         if st.button("🔄 情報を更新"):
-            load_school_homework_data.clear()
+            st.cache_data.clear() # 🌟 変更: アプリ全体のキャッシュを安全にクリア
             st.rerun()
             
     tab1, tab2, tab3 = st.tabs(["📋 提出アラート・進捗更新", "➕ 課題の一括登録", "📊 進捗ダッシュボード"])
 
     # ==========================================
-    # タブ1：アラート・進捗更新（🔥生徒ごとにまとめる版）
+    # タブ1：アラート・進捗更新
     # ==========================================
     with tab1:
         st.write("「完了（終わった）」と「提出済（学校に出した）」を分けて管理します。")
-        df = load_school_homework_data()
         
-        if df.empty:
-            st.info("現在、登録されている学校の課題はありません。")
+        df = robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
+        
+        # エラーフラグの確認を追加
+        if df.empty or 'APIエラー発生' in df.columns:
+            st.info("現在、登録されている学校の課題はありません。（または通信エラーによりデータを取得できませんでした）")
         else:
             df_active = df[df["ステータス"] != "提出済"].copy()
             df_active["提出期限"] = pd.to_datetime(df_active["提出期限"], errors='coerce').dt.date
@@ -36,33 +42,26 @@ def render_school_homework_page():
 
             today = date.today()
 
-            # 優先度（ヤバさ）を計算するロジック
             def get_priority(row):
                 if row["ステータス"] == "完了":
-                    return 4  # すでに終わっているものは一番下（あとは出すだけ）
+                    return 4  # すでに終わっているものは一番下
                 
                 days_left = (row["提出期限"] - today).days
                 if days_left < 0:
-                    return 1  # 🔥 期限超過（最優先で対応！）
+                    return 1  # 🔥 期限超過
                 elif days_left <= 2:
-                    return 2  # 🚨 期限直前（今日・明日・明後日）
+                    return 2  # 🚨 期限直前
                 else:
                     return 3  # 🟢 まだ余裕あり
 
             df_active["優先度"] = df_active.apply(get_priority, axis=1)
-            # まず全課題をヤバい順に並び替え
             df_active = df_active.sort_values(["優先度", "提出期限"])
 
-            # 🌟 新機能：生徒ごとにグループ化するためのリストを作成
-            # （すでにヤバい順に並んでいるので、ここで上から順に生徒名を拾えば「一番ヤバい課題を抱えている生徒」が上に来ます）
             students_ordered = df_active["生徒名"].drop_duplicates().tolist()
 
-            # 生徒ごとに折りたたみ（Expander）を作成
             for student in students_ordered:
-                # その生徒の課題だけを抽出
                 student_tasks = df_active[df_active["生徒名"] == student]
                 
-                # その生徒が抱えている一番ヤバい優先度を取得して、タイトルのアイコンを決定
                 worst_priority = student_tasks["優先度"].min()
                 if worst_priority == 1:
                     header_icon = "🔴 期限超過あり！"
@@ -74,11 +73,9 @@ def render_school_homework_page():
                     header_icon = "🟢 進行中"
 
                 with st.expander(f"👤 {student} （未提出: {len(student_tasks)}件） - {header_icon}"):
-                    # その生徒の各課題を表示
                     for idx, row in student_tasks.iterrows():
                         days_left = (row["提出期限"] - today).days
                         
-                        # 個別課題のラベル設定
                         if row["ステータス"] == "完了":
                             status_label = "🟦 【提出確認】学校に出しましたか？"
                         elif days_left < 0:
@@ -88,7 +85,6 @@ def render_school_homework_page():
                         else:
                             status_label = f"🟢 あと{days_left}日"
 
-                        # 見た目をスッキリさせるためのレイアウト
                         st.markdown(f"**【{row['教科']}】 {row['課題内容']}**")
                         st.caption(f"📅 期限: {row['提出期限']} | 📝 メモ: {row['メモ']} | {status_label}")
                         
@@ -99,18 +95,22 @@ def render_school_homework_page():
                                 ["未着手", "進行中", "完了", "提出済"],
                                 index=["未着手", "進行中", "完了", "提出済"].index(row["ステータス"]),
                                 key=f"status_{idx}",
-                                label_visibility="collapsed" # ラベルを隠してスッキリ見せる
+                                label_visibility="collapsed" 
                             )
                         with col_b:
                             if st.button("💾 更新", key=f"btn_{idx}", use_container_width=True):
                                 with st.spinner("反映中..."):
-                                    if update_homework_status(row.name + 2, new_status):
-                                        load_school_homework_data.clear()
-                                        time.sleep(1.5)
+                                    # 注意: row.name (インデックス) のズレを防ぐため、スプレッドシート上の行番号を使用している前提
+                                    update_success = robust_api_call(update_homework_status, row.name + 2, new_status)
+                                    
+                                    if update_success:
+                                        st.cache_data.clear() # 🌟 キャッシュクリア
+                                        time.sleep(1)
                                         st.success(f"{row['教科']}の状況を更新しました！")
                                         st.rerun()
+                                    else:
+                                        st.error("通信エラーのため更新に失敗しました。時間をおいて再試行してください。")
                         
-                        # 最後の課題以外は区切り線を引く
                         if row.name != student_tasks.index[-1]:
                             st.divider()
 
@@ -121,10 +121,11 @@ def render_school_homework_page():
         st.subheader("➕ 学校・学年を指定して一括登録")
         st.info("課題内容を改行して入力すると、一度に複数の課題を登録できます。")
         
-        df_students = get_all_student_grades()
+        # 🌟 変更: get_student_master を使用して生徒・学校データを取得
+        df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
         
         if df_students.empty:
-            st.warning("生徒データが取得できません。設定_生徒情報シートを確認してください。")
+            st.warning("生徒データが取得できません。通信エラーか、設定_生徒情報シートを確認してください。")
         else:
             if '学校名' in df_students.columns:
                 valid_schools = sorted([s for s in df_students['学校名'].unique() if str(s).strip() != ""])
@@ -132,7 +133,10 @@ def render_school_homework_page():
                 st.error("「設定_生徒情報」シートに「学校名」列が見つかりません。")
                 return
 
-            valid_grades = sorted([g for g in df_students['学年'].unique() if str(g).strip() != ""])
+            if '学年' in df_students.columns:
+                valid_grades = sorted([g for g in df_students['学年'].unique() if str(g).strip() != ""])
+            else:
+                valid_grades = []
             
             with st.form("simple_add_form"):
                 col_f1, col_f2 = st.columns(2)
@@ -141,6 +145,7 @@ def render_school_homework_page():
                 with col_f2:
                     target_grade = st.selectbox("🎯 対象の学年", valid_grades)
                 
+                # 🌟 指定した学校・学年に一致する生徒の名前をリスト化
                 target_student_list = df_students[
                     (df_students['学校名'] == target_school) & 
                     (df_students['学年'] == target_grade)
@@ -173,11 +178,16 @@ def render_school_homework_page():
                         st.error("課題内容を1つ以上入力してください！")
                     else:
                         with st.spinner("一括登録中..."):
-                            is_success, error_msg = add_school_homework_multi(
-                                target_student_list, subject, task_list, deadline, memo
+                            result = robust_api_call(
+                                add_school_homework_multi, 
+                                target_student_list, subject, task_list, deadline, memo,
+                                fallback_value=(False, "通信エラーが発生しました。時間を置いてお試しください。")
                             )
+                            is_success, error_msg = result
+                            
                             if is_success:
                                 st.success(f"【{target_school} {target_grade}】の{len(target_student_list)}名に、{len(task_list)}個の課題を登録しました！")
+                                st.cache_data.clear() # 🌟 キャッシュクリア
                                 time.sleep(1)
                                 st.rerun()
                             else:
@@ -190,10 +200,10 @@ def render_school_homework_page():
         st.subheader("📊 生徒別の課題進捗状況")
         st.write("各生徒の課題消化率を棒グラフで確認できます。")
         
-        df_dash = load_school_homework_data()
+        df_dash = robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
         
-        if df_dash.empty:
-            st.info("現在、登録されている課題はありません。")
+        if df_dash.empty or 'APIエラー発生' in df_dash.columns:
+            st.info("現在、登録されている課題はありません。（または通信エラーにより取得できませんでした）")
         else:
             students_with_hw = sorted(df_dash['生徒名'].unique())
             
