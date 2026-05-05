@@ -36,6 +36,8 @@ def render_student_details_page(selected_student_option):
     with tab_info:
         info = get_student_info(selected_student)
         
+        if student_id == "未設定" and "生徒ID" in info:
+            student_id = str(info["生徒ID"]).strip()
         # 🌟 APIエラー対策付きの読み込み (robust_api_callでスッキリ！)
         df_test = robust_api_call(load_test_scores, fallback_value=pd.DataFrame())
         
