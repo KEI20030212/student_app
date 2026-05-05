@@ -4,6 +4,9 @@ import streamlit as st
 import pandas as pd
 from utils.g_sheets import get_all_accounts, add_new_account, delete_account
 
+# 🌟 追加: アカウント管理画面もAPIガードで鉄壁に守る！
+from utils.api_guard import robust_api_call
+
 def render_account_manager_page():
     # 念のための最強のセキュリティロック（URL等で直接アクセスされた時用）
     if st.session_state.get('role') != 'admin':
@@ -15,8 +18,9 @@ def render_account_manager_page():
 
     st.header("⚙️ アカウント・システム設定")
     
-    # 1. 現在のアカウント一覧を取得
-    accounts_dict = get_all_accounts()
+    # 🌟 変更: アカウント一覧の取得を robust_api_call で保護
+    with st.spinner("アカウント情報を取得中..."):
+        accounts_dict = robust_api_call(get_all_accounts, fallback_value={})
     
     st.subheader("👥 登録済みアカウント一覧")
     if accounts_dict:
@@ -42,7 +46,7 @@ def render_account_manager_page():
         df_accounts = pd.DataFrame(account_list)
         st.dataframe(df_accounts, hide_index=True, use_container_width=True)
     else:
-        st.info("アカウントデータがありません。")
+        st.info("アカウントデータがありません。（または通信エラー）")
 
     st.divider()
 
@@ -79,9 +83,9 @@ def render_account_manager_page():
             elif new_id in accounts_dict:
                 st.error(f"⚠️ ユーザーID「{new_id}」は既に使われています。別のIDにしてください。")
             else:
-                # 登録処理を実行
+                # 🌟 変更: 登録処理を robust_api_call で保護
                 with st.spinner("スプレッドシートに登録中..."):
-                    success = add_new_account(new_id, new_pass, new_name, new_role)
+                    success = robust_api_call(add_new_account, new_id, new_pass, new_name, new_role, fallback_value=False)
                 
                 if success:
                     get_all_accounts.clear()
@@ -90,6 +94,9 @@ def render_account_manager_page():
                     
                     # 画面を再起動して最新のリストを再読み込み
                     st.rerun()
+                else:
+                    st.error("❌ アカウントの作成に失敗しました。通信状況を確認してください。")
+                    
     # ==========================================
     # 🌟 3. 新規追加: アカウント削除機能
     # ==========================================
@@ -117,16 +124,15 @@ def render_account_manager_page():
                     target_id = selected_to_delete.split(" ")[0]
                     
                     # ログイン中の自分自身のアカウントは消せないようにする（事故防止）
-                    # （※ログインIDのセッション名が 'username' ではない場合は適宜直してください）
                     if target_id == st.session_state.get('username'): 
                         st.error("⛔ 自分自身のアカウントは削除できません！")
                     else:
+                        # 🌟 変更: 削除処理を robust_api_call で保護
                         with st.spinner("アカウントを削除中..."):
-                            success = delete_account(target_id)
+                            success = robust_api_call(delete_account, target_id, fallback_value=False)
                         
                         if success:
                             get_all_accounts.clear()
-
                             st.session_state['toast_msg'] = f"🗑️ アカウント「{target_id}」を削除しました。"
                             st.rerun()
                         else:
