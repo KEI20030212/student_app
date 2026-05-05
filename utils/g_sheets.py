@@ -350,7 +350,153 @@ def load_self_study_data():
         print(f"自習記録の読み込みエラー: {e}")
         import pandas as pd
         return pd.DataFrame()
+
+#quiz_dashboard.py
+def get_quiz_master_dict():
+    """
+    「設定_小テスト一覧」シートから、テスト名と満点・用紙サイズの対応表を取得する
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet("設定_小テスト一覧")
+        
+        # get_all_values() はデータをリストの形で取得します
+        all_records = worksheet.get_all_values()
+        master_dict = {}
+        
+        # 1行目（ヘッダー）を飛ばしてループ
+        # A列:テキスト名(row[0]), B列:単元名(row[1]), C列:満点(row[2]), D列:用紙サイズ(row[3]) と仮定
+        for row in all_records[1:]:
+            if len(row) >= 3:
+                # 記録シート側の quiz_name と合わせるため「テキスト_単元」をキーにする
+                quiz_key = f"{row[0]}_{row[1]}"
+                
+                # C列（満点）の取得
+                try:
+                    full_marks = float(row[2])
+                except ValueError:
+                    full_marks = 100 # 数字でない場合はデフォルト100点
+                    
+                # 🌟 【ここを追加！】D列（用紙サイズ）の取得
+                # 行のデータが4つ以上ある ＆ 空欄じゃない場合はそのサイズを使い、それ以外は「A4」にする安全策
+                if len(row) >= 4 and row[3].strip() != "":
+                    paper_size = row[3].strip()
+                else:
+                    paper_size = "A4"
+                
+                # 🌟 【ここを変更！】辞書の中に "サイズ" も一緒に保存する
+                master_dict[quiz_key] = {
+                    "full_marks": full_marks,
+                    "サイズ": paper_size
+                }
+                
+        return master_dict
+    except Exception as e:
+        print(f"小テスト設定の読み込みエラー: {e}")
+        return {}
+
+def save_quiz_to_dedicated_sheet(date_str, student_name, text_name, chapter, score, w_nums, mode):
+    """
+    小テスト専用シートに記録を保存する
+    mode: "授業内" または "自習"
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("小テスト記録")
+        
+        row_data = [
+            date_str,      # 日時
+            student_name,  # 名前
+            text_name,     # テキスト
+            chapter,       # 単元
+            score,         # 点数
+            w_nums,        # ミス問題番号
+            mode           # 実施形態（授業内/自習）
+        ]
+        
+        ws.append_row(row_data)
+        return True
+    except Exception as e:
+        st.error(f"小テスト保存エラー: {e}")
+        return False
+
+#school_homework.py
+@st.cache_data(ttl=60) # 短めのキャッシュでリアルタイム性を確保
+def load_school_homework_data():
+    """学校の課題データを全件取得（APIエラー対策版）"""
+
+    gc = get_gc_client()
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            sh = gc.open_by_key(SPREADSHEET_ID)
+            ws = sh.worksheet("学校課題管理")
+            data = ws.get_all_records()
+            return pd.DataFrame(data)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                st.error(f"データ取得に失敗しました: {e}")
+                return pd.DataFrame()
+
+def update_homework_status(row_index, new_status):
+    """課題のステータスを更新（row_indexはDataFrameのインデックス+2）"""
+
+    gc = get_gc_client()
+    for attempt in range(3):
+        try:
+            sh = gc.open_by_key(SPREADSHEET_ID)
+            ws = sh.worksheet("学校課題管理")
+            # ステータス列（F列 = 6番目）を更新
+            ws.update_cell(row_index, 6, new_status)
+            return True
+        except Exception:
+            time.sleep(2)
+    return False
+
+def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
+    """
+    複数人の生徒に対し、複数の課題を一括で登録する
+    task_list: ['課題1', '課題2', ...] というリスト形式
+    """
+    if not student_list or not task_list:
+        return False, "生徒または課題が空です。"
+
+    gc = get_gc_client()
+    max_retries = 3
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    deadline_str = deadline.strftime("%Y-%m-%d")
     
+    # 全生徒 × 全課題 の行データを作成
+    rows_to_add = []
+    for task in task_list:
+        for student in student_list:
+            rows_to_add.append([
+                now_str,
+                student,
+                subject,
+                task,      # ここがループで回ってきた各課題
+                deadline_str,
+                "未着手",
+                memo
+            ])
+
+    last_error = ""
+    for attempt in range(max_retries):
+        try:
+            sh = gc.open_by_key(SPREADSHEET_ID)
+            ws = sh.worksheet("学校課題管理")
+            ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
+            return True, "成功"
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(2)
+            
+    return False, last_error
+
 #改良前
 @st.cache_data(ttl=60)
 def get_all_student_names():
@@ -1090,31 +1236,6 @@ def get_sent_messages(sender_id):
         return sorted(sent_msgs, key=lambda x: x['送信日時'], reverse=True)
     except Exception as e:
         return []
-def save_quiz_to_dedicated_sheet(date_str, student_name, text_name, chapter, score, w_nums, mode):
-    """
-    小テスト専用シートに記録を保存する
-    mode: "授業内" または "自習"
-    """
-    try:
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        ws = sh.worksheet("小テスト記録")
-        
-        row_data = [
-            date_str,      # 日時
-            student_name,  # 名前
-            text_name,     # テキスト
-            chapter,       # 単元
-            score,         # 点数
-            w_nums,        # ミス問題番号
-            mode           # 実施形態（授業内/自習）
-        ]
-        
-        ws.append_row(row_data)
-        return True
-    except Exception as e:
-        st.error(f"小テスト保存エラー: {e}")
-        return False
 
 def load_quiz_data_from_dedicated_sheet(student_name):
     """
@@ -1199,25 +1320,6 @@ def delete_account(user_id):
         print(f"アカウント削除エラー: {e}")
         return False
 
-@st.cache_data(ttl=60) # 短めのキャッシュでリアルタイム性を確保
-def load_school_homework_data():
-    """学校の課題データを全件取得（APIエラー対策版）"""
-
-    gc = get_gc_client()
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            sh = gc.open_by_key(SPREADSHEET_ID)
-            ws = sh.worksheet("学校課題管理")
-            data = ws.get_all_records()
-            return pd.DataFrame(data)
-        except Exception as e:
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                st.error(f"データ取得に失敗しました: {e}")
-                return pd.DataFrame()
-
 def add_school_homework(student_name, subject, content, deadline, memo):
     """新しい課題を登録（APIエラー対策版）"""
     gc = get_gc_client()
@@ -1241,61 +1343,6 @@ def add_school_homework(student_name, subject, content, deadline, memo):
         except Exception:
             time.sleep(2)
     return False
-
-def update_homework_status(row_index, new_status):
-    """課題のステータスを更新（row_indexはDataFrameのインデックス+2）"""
-
-    gc = get_gc_client()
-    for attempt in range(3):
-        try:
-            sh = gc.open_by_key(SPREADSHEET_ID)
-            ws = sh.worksheet("学校課題管理")
-            # ステータス列（F列 = 6番目）を更新
-            ws.update_cell(row_index, 6, new_status)
-            return True
-        except Exception:
-            time.sleep(2)
-    return False
-    
-def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
-    """
-    複数人の生徒に対し、複数の課題を一括で登録する
-    task_list: ['課題1', '課題2', ...] というリスト形式
-    """
-    if not student_list or not task_list:
-        return False, "生徒または課題が空です。"
-
-    gc = get_gc_client()
-    max_retries = 3
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    deadline_str = deadline.strftime("%Y-%m-%d")
-    
-    # 全生徒 × 全課題 の行データを作成
-    rows_to_add = []
-    for task in task_list:
-        for student in student_list:
-            rows_to_add.append([
-                now_str,
-                student,
-                subject,
-                task,      # ここがループで回ってきた各課題
-                deadline_str,
-                "未着手",
-                memo
-            ])
-
-    last_error = ""
-    for attempt in range(max_retries):
-        try:
-            sh = gc.open_by_key(SPREADSHEET_ID)
-            ws = sh.worksheet("学校課題管理")
-            ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
-            return True, "成功"
-        except Exception as e:
-            last_error = str(e)
-            time.sleep(2)
-            
-    return False, last_error
 
 @st.cache_data(ttl=600)
 def get_all_student_grades():
@@ -1343,49 +1390,6 @@ def get_student_quiz_records(student_name):
         print(f"小テスト記録の読み込みエラー: {e}")
         return [] # エラー時は空のリストを返す
 
-def get_quiz_master_dict():
-    """
-    「設定_小テスト一覧」シートから、テスト名と満点・用紙サイズの対応表を取得する
-    """
-    try:
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet("設定_小テスト一覧")
-        
-        # get_all_values() はデータをリストの形で取得します
-        all_records = worksheet.get_all_values()
-        master_dict = {}
-        
-        # 1行目（ヘッダー）を飛ばしてループ
-        # A列:テキスト名(row[0]), B列:単元名(row[1]), C列:満点(row[2]), D列:用紙サイズ(row[3]) と仮定
-        for row in all_records[1:]:
-            if len(row) >= 3:
-                # 記録シート側の quiz_name と合わせるため「テキスト_単元」をキーにする
-                quiz_key = f"{row[0]}_{row[1]}"
-                
-                # C列（満点）の取得
-                try:
-                    full_marks = float(row[2])
-                except ValueError:
-                    full_marks = 100 # 数字でない場合はデフォルト100点
-                    
-                # 🌟 【ここを追加！】D列（用紙サイズ）の取得
-                # 行のデータが4つ以上ある ＆ 空欄じゃない場合はそのサイズを使い、それ以外は「A4」にする安全策
-                if len(row) >= 4 and row[3].strip() != "":
-                    paper_size = row[3].strip()
-                else:
-                    paper_size = "A4"
-                
-                # 🌟 【ここを変更！】辞書の中に "サイズ" も一緒に保存する
-                master_dict[quiz_key] = {
-                    "full_marks": full_marks,
-                    "サイズ": paper_size
-                }
-                
-        return master_dict
-    except Exception as e:
-        print(f"小テスト設定の読み込みエラー: {e}")
-        return {}
 @st.cache_data(ttl=3600)
 def load_billing_data(year_month):
     """指定した年月の請求データを取得する"""
