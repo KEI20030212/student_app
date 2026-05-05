@@ -217,17 +217,17 @@ def get_last_homework_info(name, subject):
     except Exception as e:
         return "なし", "-"
 
-def get_last_page_from_sheet(name):
+def get_last_page_from_sheet(name, subject): # 🌟 引数に subject を追加！
     """
-    「授業ログ統合」シートから、前回の終了ページを探し出す関数
+    「授業ログ統合」シートから、特定の科目の前回の終了ページ（進捗）を探し出す関数
     """
     try:
         df = get_all_logs()
-        if df.empty or '名前' not in df.columns:
+        if df.empty or '名前' not in df.columns or '科目' not in df.columns:
             return 0
             
-        # 名前でフィルタリング
-        student_df = df[df['名前'] == name]
+        # 🌟 名前と科目でフィルタリング（絞り込み）
+        student_df = df[(df['名前'] == name) & (df['科目'] == subject)]
         
         if student_df.empty:
             return 0
@@ -248,7 +248,7 @@ def get_last_page_from_sheet(name):
             # 昔のデータ（純粋な数字）なら、今まで通り整数にする
             return int(float(last_page))
         except ValueError:
-            # 新しいデータ（「P.10〜20」など）や文字なら、無理に数字にせずそのまま文字として返す
+            # 新しいデータ（「P.10〜20」など）や複数行の文字なら、そのまま文字として返す
             return str(last_page)
             
     except Exception as e:
