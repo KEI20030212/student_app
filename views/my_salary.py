@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import time # 🌟 追加: ボタンアニメーション用
 
 # 🌟 共通の防御関数をインポート
 from utils.api_guard import robust_api_call
@@ -7,9 +8,9 @@ from utils.g_sheets import load_published_salary
 from utils.pdf_generator import generate_payslip_pdf
 
 # --- 🚀 データ取得を高速化＆保護するキャッシュ関数 ---
-# 💡 スピナーのメッセージを追加してフリーズ感を解消
-@st.cache_data(show_spinner="☁️ 給与データを取得中...")
-def fetch_published_salary_cached():
+# 🌟 変更: ttlを追加してキャッシュのルールを他のページと統一
+@st.cache_data(ttl=600, show_spinner="☁️ 給与データを取得中...")
+def cached_load_published_salary():
     """公開済みの給与データを取得・キャッシュ・防御"""
     return robust_api_call(load_published_salary, fallback_value=pd.DataFrame())
 
@@ -21,7 +22,7 @@ def render_my_salary_page():
     st.write("※教室長から公開された確定済みの給与明細を表示しています。")
 
     # 1. 公開された給与データを読み込む（キャッシュ＆防御経由で爆速！）
-    df_all_salaries = fetch_published_salary_cached()
+    df_all_salaries = cached_load_published_salary()
     
     # --------------------------------------------------------
     # 🌟 操作パネル（月選択 ＆ 更新ボタン）を画面上部に配置
@@ -43,9 +44,10 @@ def render_my_salary_page():
         
     with col_btn:
         if st.button("🔄 最新データに更新", type="primary", use_container_width=True):
-            # このページ用のキャッシュだけをピンポイントでクリア
-            fetch_published_salary_cached.clear()
+            # 🌟 変更: アプリ全体のキャッシュを綺麗にリセットして確実な更新を行う
+            st.cache_data.clear()
             st.toast("最新データを取得します...", icon="⏳")
+            time.sleep(0.5)
             st.rerun()
 
     st.divider()
