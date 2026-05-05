@@ -39,7 +39,12 @@ def render_search_page():
                 
                 del_student_option = d_col1.selectbox("削除する生徒", student_options if student_options else ["-- データなし --"])
                 del_date = d_col2.date_input("間違えた授業日", datetime.date.today())
-                del_subject = d_col3.selectbox("間違えた科目", ["英語", "数学", "国語", "理科", "社会"])
+                time_slots = [
+                    "Aコマ目 (9:30~11:00)", "Bコマ目 (11:10~12:40)",
+                    "0コマ目 (13:10~14:40)", "1コマ目 (14:50~16:20)",
+                    "2コマ目 (16:40~18:10)", "3コマ目 (18:20~19:50)", "4コマ目 (20:00~21:30)"
+                ]
+                del_period = d_col3.selectbox("間違えた授業コマ", time_slots)
                 
                 if st.form_submit_button("🚨 この記録を削除する", type="primary"):
                     if del_student_option == "-- データなし --":
@@ -51,17 +56,17 @@ def render_search_page():
                         date_str = del_date.strftime("%Y/%m/%d")
                         
                         with st.spinner("データを削除中..."):
-                            # 🌟 第1引数に生徒IDを追加して渡す
-                            success = robust_api_call(delete_specific_log, del_id, del_name, date_str, del_subject, fallback_value=False)
+                            # 🌟 変更：del_subject を del_period に変更して関数に渡す
+                            success = robust_api_call(delete_specific_log, del_id, del_name, date_str, del_period, fallback_value=False)
                             
                         if success:
-                            st.success(f"✅ {date_str} の {del_name} さん ({del_subject}) の記録を削除しました！")
-                            # アプリ全体のキャッシュをクリアして最新状態を読み込み直す
+                            # 🌟 成功時のメッセージも del_period を表示するように変更
+                            st.success(f"✅ {date_str} の {del_name} さん ({del_period}) の記録を削除しました！")
                             st.cache_data.clear()
                             time.sleep(1.5)
                             st.rerun()
                         else:
-                            st.error("⚠️ 該当する記録が見つかりませんでした。日付や科目を確認してください。（または通信エラーの可能性があります）")
+                            st.error("⚠️ 該当する記録が見つかりませんでした。日付や授業コマを確認してください。（または通信エラーの可能性があります）")
     
     st.divider()
 
