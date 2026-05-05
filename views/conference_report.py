@@ -2,29 +2,22 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import streamlit.components.v1 as components
-import time
+
+# 🌟 APIガードをインポート
+from utils.api_guard import robust_api_call
 
 # ==========================================
-# 🛡️ APIエラー対策：データ読み込み関数群（追加・更新）
+# 🛡️ APIエラー対策：データ読み込み関数群（超スッキリ化！）
 # ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_load_self_study_by_student(student_name):
     """特定の生徒の自習データを取得して月別に集計する"""
     from utils.g_sheets import load_self_study_data
-    max_retries = 5
-    df = pd.DataFrame()
     
-    for attempt in range(max_retries):
-        try:
-            df = load_self_study_data()
-            break
-        except Exception:
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                return pd.DataFrame()
+    # 🌟 robust_api_call で取得
+    df = robust_api_call(load_self_study_data, fallback_value=pd.DataFrame())
 
-    if df.empty or '生徒名' not in df.columns:
+    if df.empty or '生徒名' not in df.columns or "APIエラー発生" in df.columns:
         return pd.DataFrame()
     
     # 該当生徒のみ抽出
@@ -47,60 +40,56 @@ def cached_load_self_study_by_student(student_name):
     
     return df_monthly
 
-# (他の既存のcached関数はそのまま...)
 @st.cache_data(ttl=600, show_spinner=False)
 def safe_load_test_scores():
     from utils.g_sheets import load_test_scores
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            return load_test_scores()
-        except Exception:
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                return pd.DataFrame()
+    # 🌟 robust_api_call で取得
+    return robust_api_call(load_test_scores, fallback_value=pd.DataFrame())
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_get_textbook_master():
     from utils.g_sheets import get_textbook_master
-    return get_textbook_master()
+    # 🌟 robust_api_call で取得（マスターデータは辞書型を想定）
+    return robust_api_call(get_textbook_master, fallback_value={})
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_load_quiz_data(student_name):
     from utils.g_sheets import load_quiz_data_from_dedicated_sheet
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            return load_quiz_data_from_dedicated_sheet(student_name)
-        except Exception:
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                return pd.DataFrame()
+    # 🌟 引数ありの関数は lambda で渡す
+    return robust_api_call(lambda: load_quiz_data_from_dedicated_sheet(student_name), fallback_value=pd.DataFrame())
 
+# 🌟 変更: load_raw_data ではなく get_all_logs を使用し、IDでフィルタリング！
 @st.cache_data(ttl=600, show_spinner=False)
-def cached_calculate_attendance_rate(student_name):
-    from utils.g_sheets import load_raw_data
-    max_retries = 5
-    df_attendance = pd.DataFrame()
-    for attempt in range(max_retries):
-        try:
-            df_attendance = load_raw_data(student_name)
-            break
-        except Exception:
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-            else:
-                return "取得エラー"
-    if df_attendance.empty or '出欠' not in df_attendance.columns:
+def cached_calculate_attendance_rate(student_id, student_name):
+    from utils.g_sheets import get_all_logs
+    
+    # 🌟 授業ログ統合シートのデータを取得
+    df_all_logs = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+    
+    if df_all_logs.empty or '出欠' not in df_all_logs.columns or "APIエラー発生" in df_all_logs.columns:
         return "データなし"
+        
+    # 🌟 生徒IDを使ってフィルタリング（IDがない場合は名前で安全対策）
+    if student_id != "未設定" and '生徒ID' in df_all_logs.columns:
+        df_student = df_all_logs[df_all_logs['生徒ID'].astype(str) == str(student_id)]
+    else:
+        # 万が一ID列がない、または未設定の場合は「名前」列で検索
+        name_col = '名前' if '名前' in df_all_logs.columns else '生徒名'
+        if name_col in df_all_logs.columns:
+            df_student = df_all_logs[df_all_logs[name_col] == student_name]
+        else:
+            return "データなし"
+
+    if df_student.empty:
+        return "0% (履歴なし)"
+        
     attend_keywords = ['出席（通常）', '出席（振替授業を消化）']
     absent_keywords = ['欠席（後日振替あり）', '欠席（振替なし）']
-    records = df_attendance['出欠'].dropna().astype(str)
+    records = df_student['出欠'].dropna().astype(str)
     attend_count = records.isin(attend_keywords).sum()
     absent_count = records.isin(absent_keywords).sum()
     total_lessons = attend_count + absent_count
+    
     if total_lessons == 0: return "0% (履歴なし)"
     rate = (attend_count / total_lessons) * 100
     return f"{int(rate)}%"
@@ -108,8 +97,21 @@ def cached_calculate_attendance_rate(student_name):
 # ==========================================
 # 🎯 面談レポート画面のメイン関数
 # ==========================================
-def render_conference_report(selected_student, info):
-    # --- 🖨️ 印刷用の魔法（既存のまま） ---
+# 🌟 引数名を selected_student_option に変更
+def render_conference_report(selected_student_option, info):
+    
+    # 🌟 IDと名前の分割＆自己修復機能
+    if " - " in selected_student_option:
+        student_id = selected_student_option.split(" - ")[0]
+        student_name = selected_student_option.split(" - ")[1]
+    else:
+        student_id = "未設定"
+        student_name = selected_student_option
+        
+    if student_id == "未設定" and "生徒ID" in info:
+        student_id = str(info["生徒ID"]).strip()
+
+    # --- 🖨️ 印刷用の魔法 ---
     st.markdown("""
         <style>
         @media print {
@@ -126,7 +128,7 @@ def render_conference_report(selected_student, info):
 
     col_title, col_print = st.columns([4, 1])
     with col_title:
-        st.header(f"🎓 {selected_student} さん 面談レポート")
+        st.header(f"🎓 {student_name} さん 面談レポート") # 🌟 名前のみ表示
     with col_print:
         if st.button("🖨️ レポートを印刷"):
             components.html("<script>window.parent.print();</script>", height=0)
@@ -135,15 +137,14 @@ def render_conference_report(selected_student, info):
 
     with st.spinner("学習データを集計中..."):
         master_dict = cached_get_textbook_master()
-        df_quiz = cached_load_quiz_data(selected_student)
+        df_quiz = cached_load_quiz_data(student_name)
         df_test_all = safe_load_test_scores()
-        # 💡 追加：自習データの読み込み
-        df_monthly_ss = cached_load_self_study_by_student(selected_student)
+        df_monthly_ss = cached_load_self_study_by_student(student_name)
 
     # 既存のテストデータ抽出
     df_student_tests = pd.DataFrame()
-    if not df_test_all.empty:
-        df_student_tests = df_test_all[df_test_all['生徒名'] == selected_student]
+    if not df_test_all.empty and "APIエラー発生" not in df_test_all.columns:
+        df_student_tests = df_test_all[df_test_all['生徒名'] == student_name]
 
     st.divider()
 
@@ -154,7 +155,8 @@ def render_conference_report(selected_student, info):
     col1, col2, col3, col4 = st.columns(4)
     
     with st.spinner("出席率を計算中..."):
-        attendance_rate = cached_calculate_attendance_rate(selected_student)
+        # 🌟 引数に student_id と student_name を渡すように変更
+        attendance_rate = cached_calculate_attendance_rate(student_id, student_name)
     
     hw_rate_str = str(info.get('宿題履行率', '0')).replace('%', '')
     try:
@@ -169,7 +171,6 @@ def render_conference_report(selected_student, info):
     col3.metric("📝 小テスト総回数", f"{total_quiz_attempts} 回")
     col4.metric("🎯 志望校・目標", info.get('志望校・目的', '未設定'))
 
-    # 💡 追加：自習時間の月別グラフを表示
     st.write("#### 📅 月別の自習時間（努力の可視化）")
     if not df_monthly_ss.empty:
         # 横軸が時間、縦軸が月のバーチャート
@@ -179,7 +180,7 @@ def render_conference_report(selected_student, info):
             size=20
         ).encode(
             x=alt.X('自習時間(分):Q', title='合計自習時間 (分)'),
-            y=alt.Y('年月:N', title='月', sort=None), # ソートはデータフレーム側で済ませているのでNone
+            y=alt.Y('年月:N', title='月', sort=None),
             tooltip=['年月', '自習時間(分)']
         ).properties(height=200)
 
@@ -204,14 +205,14 @@ def render_conference_report(selected_student, info):
     st.divider()
 
     # ==========================================
-    # 2. 学校成績の推移（既存のまま）
+    # 2. 学校成績の推移
     # ==========================================
-    # ... (中略：既存の成績グラフコード) ...
     st.subheader("📈 成績の推移")
     if not df_student_tests.empty:
         view_type = st.radio("表示データ：", ["定期テスト", "模試", "内申（通知表）"], horizontal=True, key="view_type_radio")
         date_col = '実施日' if '実施日' in df_student_tests.columns else '日付' if '日付' in df_student_tests.columns else '日時' if '日時' in df_student_tests.columns else None
         type_col = 'テスト種別' if 'テスト種別' in df_student_tests.columns else 'テスト名' if 'テスト名' in df_student_tests.columns else None
+        
         if date_col:
             if view_type == "定期テスト":
                 df_plot = df_student_tests[df_student_tests[type_col].astype(str).str.contains("テスト|期末|中間|実力", na=False)].copy()
@@ -227,6 +228,7 @@ def render_conference_report(selected_student, info):
                 df_plot[date_col] = pd.to_datetime(df_plot[date_col], errors='coerce')
                 df_plot = df_plot.sort_values(date_col)
                 available_subjects = [s for s in subjects if s in df_plot.columns]
+                
                 if available_subjects:
                     df_melted = df_plot.melt(id_vars=[date_col], value_vars=available_subjects, var_name='科目', value_name='スコア')
                     df_melted['スコア'] = pd.to_numeric(df_melted['スコア'], errors='coerce').dropna()
