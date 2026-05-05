@@ -6,11 +6,10 @@ import zipfile
 import io
 import unicodedata
 
-# 🌟 共通の防御関数をインポート
 from utils.api_guard import robust_api_call
+# 🌟 変更: 個別データ取得関数を全削除し、一括取得関数(get_all_logs)に統一
 from utils.g_sheets import (
-    get_all_student_names, 
-    load_all_data, 
+    get_all_logs, 
     load_instructor_master, 
     update_instructor_master,
     publish_salary_data
@@ -18,28 +17,12 @@ from utils.g_sheets import (
 from utils.pdf_generator import generate_payslip_pdf
 
 # --- 🚀 データ取得を高速化＆保護するキャッシュ関数 ---
-@st.cache_data(show_spinner="☁️ 生徒ごとの授業データを集計中...")
-def fetch_salary_student_data_cached(student_names):
-    """全生徒の授業データを一括取得してキャッシュ"""
-    all_data_list = []
-    total_students = len(student_names)
-    
-    p_bar = st.progress(0)
-    t_status = st.empty()
-    
-    for i, s_name in enumerate(student_names):
-        t_status.text(f"📥 {s_name} さんのデータを読み込み中... ({i+1}/{total_students})")
-        df = robust_api_call(load_all_data, s_name, fallback_value=pd.DataFrame())
-        if not df.empty:
-            df['生徒名'] = s_name
-            all_data_list.append(df)
-        p_bar.progress((i + 1) / total_students)
-    
-    t_status.empty()
-    p_bar.empty()
-    return all_data_list
+# 🌟 変更: 統合シートから一括で取得する爆速関数に変更
+@st.cache_data(ttl=60, show_spinner="☁️ 授業データを一括取得中...（超高速🚀）")
+def cached_get_all_logs():
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
-@st.cache_data(show_spinner="☁️ 講師マスタを読み込み中...")
+@st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
     """講師マスタを取得・キャッシュ"""
     df = robust_api_call(load_instructor_master, fallback_value=pd.DataFrame())
@@ -52,35 +35,33 @@ def render_salary_dashboard_page():
 
     # --- 1. データ取得（まずはベースとなるデータを揃える） ---
     df_instructors = fetch_instructor_master_cached()
-    student_names = robust_api_call(get_all_student_names, fallback_value=[])
 
-    if not student_names:
-        st.warning("⚠️ 生徒名リストを取得できませんでした。更新ボタンを押してください。")
-        # 更新ボタンは下に配置するのでここではreturn
-    
     # --------------------------------------------------------
-    # 🌟 操作パネル（損益ダッシュボードと統一）
+    # 🌟 操作パネル（一括データ取得＆ゆらぎ吸収）
     # --------------------------------------------------------
-    # 先に全データをロードして年月リストを作る
-    all_data_list = fetch_salary_student_data_cached(student_names)
+    df_all = cached_get_all_logs()
     month_options = ["データなし"]
-    df_all = pd.DataFrame()
     
-    if all_data_list:
-        df_all = pd.concat(all_data_list, ignore_index=True)
-        if '日時' in df_all.columns:
-            df_all['日時'] = pd.to_datetime(df_all['日時'], format='mixed', errors='coerce')
-            df_all = df_all.dropna(subset=['日時'])
-            df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
-            month_options = sorted(df_all['年月'].unique().tolist(), reverse=True)
+    if not df_all.empty and "APIエラー発生" not in df_all.columns and '日時' in df_all.columns:
+        # 🌟 列名の揺れを吸収
+        name_col = '名前' if '名前' in df_all.columns else '生徒名'
+        df_all = df_all.rename(columns={name_col: '生徒名'})
+        
+        df_all['日時'] = pd.to_datetime(df_all['日時'], format='mixed', errors='coerce')
+        df_all = df_all.dropna(subset=['日時'])
+        df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
+        month_options = sorted(df_all['年月'].unique().tolist(), reverse=True)
+    else:
+        df_all = pd.DataFrame()
 
     col_month, col_btn = st.columns([2, 1], vertical_alignment="bottom")
     with col_month:
         selected_month = st.selectbox("📅 集計する月を選択", month_options)
     with col_btn:
         if st.button("🔄 給与データを最新に更新", type="primary", use_container_width=True):
-            st.cache_data.clear()
+            st.cache_data.clear() # 🌟 アプリ全体のキャッシュをクリアしてリフレッシュ
             st.toast("最新データを取得中...", icon="⏳")
+            time.sleep(0.5)
             st.rerun()
 
     st.divider()
@@ -98,6 +79,7 @@ def render_salary_dashboard_page():
             # --- 給与計算ロジック ---
             df_month = df_all[df_all['年月'] == selected_month].copy()
             df_month['担当講師'] = df_month['担当講師'].astype(str)
+            # 複数講師が担当した場合（コンマ区切り等）を分割して行を増やす
             df_month_exploded = df_month.assign(担当講師=df_month['担当講師'].str.split(r'[\n,、]')).explode('担当講師')
             df_month_exploded['担当講師'] = df_month_exploded['担当講師'].str.strip()
             
@@ -112,7 +94,9 @@ def render_salary_dashboard_page():
             for teacher in valid_teachers:
                 df_teacher = df_month_exploded[df_month_exploded['担当講師'] == teacher].copy()
                 df_teacher['日付'] = df_teacher['日時'].dt.date
-                df_teacher = df_teacher.drop_duplicates(subset=['生徒名', '日付', '授業コマ'])
+                
+                # 🌟 同じ日・同じコマに複数生徒を教えている場合（1:2や1:3）の重複を排除して「1コマ」としてカウント
+                df_teacher = df_teacher.drop_duplicates(subset=['日付', '授業コマ'])
 
                 t_row_df = df_instructors[df_instructors["講師名"] == teacher]
                 if t_row_df.empty:
@@ -129,9 +113,9 @@ def render_salary_dashboard_page():
                     trans = safe_int(t_row.get('交通費', 0), 0)
                     allowance = safe_int(t_row.get('役職手当', 0), 0)
 
-                koma_11 = math.ceil(len(df_teacher[df_teacher['授業形態'] == '1:1']) / 1)
-                koma_12 = math.ceil(len(df_teacher[df_teacher['授業形態'] == '1:2']) / 2)
-                koma_13 = math.ceil(len(df_teacher[df_teacher['授業形態'] == '1:3']) / 3)
+                koma_11 = len(df_teacher[df_teacher['授業形態'] == '1:1'])
+                koma_12 = len(df_teacher[df_teacher['授業形態'] == '1:2'])
+                koma_13 = len(df_teacher[df_teacher['授業形態'] == '1:3'])
 
                 total_koma = koma_11 + koma_12 + koma_13
                 koma_salary = (koma_11 * p11) + (koma_12 * p12) + (koma_13 * p13)
@@ -178,7 +162,6 @@ def render_salary_dashboard_page():
         target_teacher = st.selectbox("設定を変更する講師を選択してください", ["選択してください"] + df_instructors["講師名"].tolist())
         
         if target_teacher != "選択してください":
-            # 選択された講師の現在のデータを取得
             current_vals = df_instructors[df_instructors["講師名"] == target_teacher].iloc[0]
             
             with st.form("individual_edit_form"):
@@ -192,7 +175,6 @@ def render_salary_dashboard_page():
                     new_allowance = st.number_input("役職手当", value=int(current_vals['役職手当']), step=1000)
                 
                 if st.form_submit_button("✅ この内容で保存する", type="primary"):
-                    # データフレームを更新
                     idx = df_instructors.index[df_instructors["講師名"] == target_teacher][0]
                     df_instructors.at[idx, '1:1単価'] = new_11
                     df_instructors.at[idx, '1:2単価'] = new_12
@@ -202,7 +184,7 @@ def render_salary_dashboard_page():
                     
                     with st.spinner("☁️ 保存中..."):
                         if robust_api_call(update_instructor_master, df_instructors, fallback_value=False):
-                            st.cache_data.clear()
+                            st.cache_data.clear() # 🌟 保存後にキャッシュを消去
                             st.success(f"✅ {target_teacher} 先生の設定を更新しました！")
                             time.sleep(1)
                             st.rerun()
