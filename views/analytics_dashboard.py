@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
-import re  # 👈 文字から数字を抜き出すためのツールを追加！
-from utils.g_sheets import get_all_student_names, load_all_data
+import re  
+# 🌟 変更: 生徒個別のデータ取得関数を消し、一括取得関数(get_all_logs)のみインポート
+from utils.g_sheets import get_all_logs 
+from utils.api_guard import robust_api_call
 
 # --- 🌟 追加機能：「P.14~17」などからページ数を自動計算する関数 ---
 def calculate_page_amount(text):
@@ -22,6 +24,10 @@ def calculate_page_amount(text):
     
     return 0
 
+# 🌟 全データを一括取得するキャッシュ関数
+@st.cache_data(ttl=60)
+def cached_get_all_logs():
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
 def render_analytics_dashboard_page():
     st.header("📊 講師パフォーマンス分析ダッシュボード")
@@ -30,51 +36,60 @@ def render_analytics_dashboard_page():
     # --- 列名の設定 ---
     report_col = 'アドバイス'
     hw_content_col = '次回の宿題ページ数'
-    hw_status_col = 'やった宿題P'
+    
+    # 🌟 変更: 統合シートの列名「やった宿題P」に合わせる
+    hw_status_col = 'やった宿題P' 
+    # もし統合シート側が「やった宿題」なら以下のように自動で切り替える
+    # hw_status_col = 'やった宿題P' if 'やった宿題P' in df_all.columns else 'やった宿題'
 
     # 月の選択肢準備
     today = pd.Timestamp.now()
     default_months = [(today - pd.DateOffset(months=i)).strftime("%Y年%m月") for i in range(12)]
-    df_all = pd.DataFrame()
-
-    # 1. データ読み込み
-    student_names = get_all_student_names()
-    if not student_names:
-        st.info("💡 生徒データが登録されていません。")
-    else:
-        all_data_list = []
-        with st.spinner('全データを解析中... 先生たちのマネジメント力を集計しています！'):
-            for s_name in student_names:
-                df = load_all_data(s_name)
-                if not df.empty:
-                    df['生徒名'] = s_name
-                    all_data_list.append(df)
+    
+    # 1. 🌟 変更: データ一括読み込み (たった1回の通信で完了！)
+    with st.spinner('全データを解析中... 先生たちのマネジメント力を集計しています！（超高速🚀）'):
+        df_all = cached_get_all_logs()
         
-        if all_data_list:
-            df_all = pd.concat(all_data_list, ignore_index=True)
-            df_all['日時'] = pd.to_datetime(df_all['日時'], format='mixed', errors='coerce')
-            df_all = df_all.dropna(subset=['日時'])
-            df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
+    if df_all.empty or "APIエラー発生" in df_all.columns:
+        st.info("💡 授業データが登録されていないか、通信エラーで取得できませんでした。")
+        return
 
-            # 熱量（文字数）の計算
-            if report_col in df_all.columns:
-                def count_chars(text):
-                    if pd.isna(text): return 0
-                    text_str = str(text).strip()
-                    if text_str.lower() in ['nan', 'none', '<na>', '']: return 0
-                    return len(text_str)
-                df_all['報告文字数'] = df_all[report_col].apply(count_chars)
+    # 🌟 名前列の統一（「生徒名」と「名前」の揺れを吸収）
+    if '名前' in df_all.columns:
+        if '生徒名' in df_all.columns:
+            df_all = df_all.drop(columns=['名前'])
+        else:
+            df_all = df_all.rename(columns={'名前': '生徒名'})
 
-            # 宿題履行率の追跡ロジック
-            if '科目' in df_all.columns and '担当講師' in df_all.columns:
-                df_all = df_all.sort_values(by=['生徒名', '科目', '日時'])
-                df_all['宿題を出した先生'] = df_all.groupby(['生徒名', '科目'])['担当講師'].shift(1)
-                
-                # 安全装置：列があるかチェック
-                if hw_content_col in df_all.columns:
-                    df_all['前回出された宿題内容'] = df_all.groupby(['生徒名', '科目'])[hw_content_col].shift(1)
-                else:
-                    df_all['前回出された宿題内容'] = None
+    df_all['日時'] = pd.to_datetime(df_all['日時'], format='mixed', errors='coerce')
+    df_all = df_all.dropna(subset=['日時'])
+    df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
+
+    # 熱量（文字数）の計算
+    if report_col in df_all.columns:
+        def count_chars(text):
+            if pd.isna(text): return 0
+            text_str = str(text).strip()
+            if text_str.lower() in ['nan', 'none', '<na>', '']: return 0
+            return len(text_str)
+        df_all['報告文字数'] = df_all[report_col].apply(count_chars)
+
+    # 宿題履行率の追跡ロジック
+    if '科目' in df_all.columns and '担当講師' in df_all.columns and '生徒名' in df_all.columns:
+        # 時系列順にソート（同じ生徒・科目の連続する授業を特定するため）
+        df_all = df_all.sort_values(by=['生徒名', '科目', '日時'])
+        
+        # 今回の行に、「前回の担当講師」と「前回の宿題内容」をスライドさせて持ってくる
+        df_all['宿題を出した先生'] = df_all.groupby(['生徒名', '科目'])['担当講師'].shift(1)
+        
+        if hw_content_col in df_all.columns:
+            df_all['前回出された宿題内容'] = df_all.groupby(['生徒名', '科目'])[hw_content_col].shift(1)
+        else:
+            df_all['前回出された宿題内容'] = None
+            
+        # 🌟 追加: 「やった宿題P」列が存在しない場合の保険
+        if hw_status_col not in df_all.columns and 'やった宿題' in df_all.columns:
+            hw_status_col = 'やった宿題'
 
     # 画面表示
     month_options = sorted(list(set(default_months + (df_all['年月'].unique().tolist() if not df_all.empty else []))), reverse=True)
@@ -122,7 +137,7 @@ def render_analytics_dashboard_page():
         st.markdown(f"**📝 宿題量コントロール力（生徒のキャパシティ把握度）**")
         st.caption("※先生が出した宿題の合計ページ数に対して、生徒が実際に解いてきた合計ページ数の割合です。")
         
-        # 該当データだけを抽出（警告回避のため .copy() を追加）
+        # 該当データだけを抽出
         df_hw_eval = df_month[
             (df_month['宿題を出した先生'] == selected_teacher) & 
             (df_month['前回出された宿題内容'].notna()) & 
