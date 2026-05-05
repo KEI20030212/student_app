@@ -30,6 +30,7 @@ def get_gc_client():
     return gspread.authorize(credentials)
 
 #改良版コード
+#汎用
 @st.cache_data(ttl=600) # 10分間キャッシュ
 def get_all_logs():
     gc = get_gc_client()
@@ -46,6 +47,27 @@ def get_student_logs(student_name):
     student_df = df[df["名前"] == student_name]
     return student_df
 
+@st.cache_data(ttl=3600) 
+def get_student_master():#「生徒のリスト（名簿全体）」が欲しいときに使う
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報")
+    df = pd.DataFrame(ws.get_all_records())
+    # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
+    return df
+
+@st.cache_data(ttl=60)
+def get_student_info(student_name):#「特定の生徒1人だけの詳細情報」が欲しいときに使う
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報")
+    records = ws.get_all_records()
+    for r in records:
+        if r.get('生徒名') == str(student_name):
+            return r
+    return {}
+
+#student_portal.pyで使用
 def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定"):
     gc = get_gc_client() 
     sh = gc.open_by_key(SPREADSHEET_ID)
@@ -106,26 +128,7 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
     import streamlit as st
     st.cache_data.clear()
 
-@st.cache_data(ttl=3600) 
-def get_student_master():#「生徒のリスト（名簿全体）」が欲しいときに使う
-    gc = get_gc_client()
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet("設定_生徒情報")
-    df = pd.DataFrame(ws.get_all_records())
-    # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
-    return df
-
-@st.cache_data(ttl=60)
-def get_student_info(student_name):#「特定の生徒1人だけの詳細情報」が欲しいときに使う
-    gc = get_gc_client()
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet("設定_生徒情報")
-    records = ws.get_all_records()
-    for r in records:
-        if r.get('生徒名') == str(student_name):
-            return r
-    return {}
-
+#multi_input.pyで使用
 def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
     # 🌟 生徒IDも表示するようにプリント文をパワーアップ！
     print(f"🌟🌟🌟 保存処理スタート！ ID:{student_id} 生徒名:{name} 🌟🌟🌟") 
@@ -152,6 +155,104 @@ def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_r
         import streamlit as st
         st.error(f"🚨 スプレッドシートの書き込みでエラーが発生しました: {e}")
         return False
+
+def get_last_handover(name, subject):
+    """
+    「授業ログ統合」シートから、特定の科目の「最新の引継ぎ事項」を抜き出す関数
+    """
+    try:
+        df = get_all_logs() # 🌟 キャッシュされた統合データを爆速で読み込み！
+        
+        if df.empty or '名前' not in df.columns or '科目' not in df.columns or '次回への引継ぎ' not in df.columns:
+            return "（シートの項目が正しく設定されていません）"
+            
+        # 名前と科目でフィルタリング（絞り込み）
+        student_df = df[(df['名前'] == name) & (df['科目'] == subject)]
+        
+        if student_df.empty:
+            return f"（{subject} の過去の記録は見つかりませんでした）"
+            
+        # 一番下の行（最新）を取得
+        last_note = student_df['次回への引継ぎ'].iloc[-1]
+        
+        # 空欄やハイフン、NaN（無効な値）などをチェック
+        if pd.notna(last_note) and str(last_note).strip() not in ["", "-", "nan"]:
+            return str(last_note)
+        else:
+            return "（前回の引継ぎ事項は空欄でした）"
+            
+    except Exception as e:
+        return f"（データ取得エラー: {e}）"
+
+def get_last_homework_info(name, subject):
+    """
+    「授業ログ統合」シートから、前回の『次回の宿題テキスト』と『ページ数（範囲）』を探し出す関数
+    """
+    try:
+        df = get_all_logs()
+        if df.empty or '名前' not in df.columns or '科目' not in df.columns:
+            return "なし", "-"
+            
+        if '次回の宿題テキスト' not in df.columns or '次回の宿題ページ数' not in df.columns:
+            return "なし", "-"
+
+        # 名前と科目でフィルタリング
+        student_df = df[(df['名前'] == name) & (df['科目'] == subject)]
+        
+        if student_df.empty:
+            return "なし", "-"
+            
+        text_name = student_df['次回の宿題テキスト'].iloc[-1]
+        pages = student_df['次回の宿題ページ数'].iloc[-1]
+        
+        # NaN対策と文字化
+        text_name_str = str(text_name).strip() if pd.notna(text_name) else ""
+        pages_str = str(pages).strip() if pd.notna(pages) else ""
+
+        final_text = text_name_str if text_name_str and text_name_str not in ["-", "nan"] else "なし"
+        final_pages = pages_str if pages_str and pages_str != "nan" else "-"
+        
+        return final_text, final_pages
+        
+    except Exception as e:
+        return "なし", "-"
+
+def get_last_page_from_sheet(name):
+    """
+    「授業ログ統合」シートから、前回の終了ページを探し出す関数
+    """
+    try:
+        df = get_all_logs()
+        if df.empty or '名前' not in df.columns:
+            return 0
+            
+        # 名前でフィルタリング
+        student_df = df[df['名前'] == name]
+        
+        if student_df.empty:
+            return 0
+            
+        # 統合シートの列名「終了ページ」または旧「ページ数」を探す
+        col_name = '終了ページ' if '終了ページ' in df.columns else 'ページ数' if 'ページ数' in df.columns else None
+        
+        if not col_name:
+            return 0
+            
+        last_page = student_df[col_name].iloc[-1]
+        
+        # 空っぽの場合は 0 を返す
+        if pd.isna(last_page) or str(last_page).strip() in ["", "-", "nan"]:
+            return 0
+            
+        try:
+            # 昔のデータ（純粋な数字）なら、今まで通り整数にする
+            return int(float(last_page))
+        except ValueError:
+            # 新しいデータ（「P.10〜20」など）や文字なら、無理に数字にせずそのまま文字として返す
+            return str(last_page)
+            
+    except Exception as e:
+        return 0
 
 #改良前
 @st.cache_data(ttl=60)
@@ -207,20 +308,6 @@ def save_seating_data(seating_dict):
         
     for row in data_to_append:
         ws.append_row(row)
-def get_last_page_from_sheet(name):
-    df = load_all_data(name)
-    if df.empty or 'ページ数' not in df.columns:
-        return 0
-    
-    last_page = df['ページ数'].iloc[-1]
-    
-    try:
-        # 昔のデータ（純粋な数字）なら、今まで通り整数にする
-        return int(last_page)
-    except ValueError:
-        # 新しいデータ（「P.10〜20」など）や「-」なら、無理に数字にせずそのまま文字として返す
-        return str(last_page)
-    return 0
 
 def update_student_homework_rate(name):
     from utils.calc_logic import calculate_quiz_points, calculate_motivation_rank
@@ -662,42 +749,7 @@ def get_textbook_master():
         # 🚨 【透視メガネ】裏側でエラーが起きたら、その理由を画面に叫ぶ！
         st.error(f"🚨 マスタ取得の裏側でエラー発生: {e}")
         return {}
-def get_last_handover(name, subject):
-    """
-    指定された生徒のシートから、特定の科目の「最新の引継ぎ事項」を抜き出す関数
-    """
-    gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        existing_sheets = [ws.title for ws in sh.worksheets()]
-        
-        if name not in existing_sheets:
-            return "（初回授業のため、前回の記録はありません）"
-            
-        worksheet = sh.worksheet(name)
-        all_data = worksheet.get_all_values() # 全データを取得
-        
-        if len(all_data) <= 1:
-            return "（記録がまだありません）"
-            
-        # ヘッダーから「科目」と「次回への引継ぎ」が何列目にあるか探す
-        header = all_data[0]
-        try:
-            sub_idx = header.index("科目")
-            note_idx = header.index("次回への引継ぎ")
-        except ValueError:
-            return "（シートの項目が正しく設定されていません）"
 
-        # 下の行（最新）から順番に見て、同じ科目のデータを探す
-        for row in reversed(all_data[1:]):
-            if row[sub_idx] == subject:
-                last_note = row[note_idx]
-                return last_note if last_note and last_note != "-" else "（前回の引継ぎ事項は空欄でした）"
-        
-        return f"（{subject} の過去の記録は見つかりませんでした）"
-
-    except Exception as e:
-        return f"（データ取得エラー: {e}）"
 def add_new_textbook(new_name):
     """
     アプリから新規テキストを登録し、自動で五十音順（A列基準）に並べ替える魔法！
@@ -719,48 +771,6 @@ def add_new_textbook(new_name):
     except Exception as e:
         st.error(f"🚨 新規テキストの裏側でエラー発生: {e}")
         return False
-
-def get_last_homework_info(name, subject):
-    """
-    前回の『次回の宿題テキスト』と『ページ数（範囲）』を探し出す関数！
-    """
-    gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        existing_sheets = [ws.title for ws in sh.worksheets()]
-        if name not in existing_sheets:
-            return "なし", "-"  # 🌟 0 から "-" に変更
-
-        ws = sh.worksheet(name)
-        all_data = ws.get_all_values()
-        if len(all_data) <= 1:
-            return "なし", "-"  # 🌟 ここも
-            
-        header = all_data[0]
-        
-        # 新しい項目がどこにあるか探す
-        try:
-            sub_idx = header.index("科目")
-            hw_text_idx = header.index("次回の宿題テキスト") 
-            hw_pages_idx = header.index("次回の宿題ページ数")
-        except ValueError:
-            # まだ一度も宿題が出されていなくて列が無い場合は「なし」を返す
-            return "なし", "-"  # 🌟 ここも
-
-        # 下（最新）から順番に見て、同じ科目のデータを探す
-        for row in reversed(all_data[1:]):
-            # 行のデータがしっかり埋まっていて、科目が一致するかチェック
-            if len(row) > max(sub_idx, hw_text_idx, hw_pages_idx) and row[sub_idx] == subject:
-                text_name = row[hw_text_idx]
-                pages = row[hw_pages_idx]
-                # 🌟 データがあればそのまま（15でも P.10〜20 でも）返し、空っぽなら "-" を返す
-                return text_name if text_name and text_name != "-" else "なし", pages if pages else "-"
-                
-        return "なし", "-"
-    except Exception as e:
-        return "なし", "-"
-
-        # utils/g_sheets.py に追加
 
 def load_instructor_master():
     """
