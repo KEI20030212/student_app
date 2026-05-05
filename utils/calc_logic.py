@@ -1,4 +1,6 @@
 import math
+import pandas as pd
+import re
 
 # 👇 quiz_name と quiz_master_dict に「=None」をつけて、無くてもOK（オプション）にします！
 def calculate_quiz_points(score, quiz_name=None, quiz_master_dict=None):
@@ -63,3 +65,11 @@ def calculate_ability_rank(naishin, dev_score):
     elif naishin >= 3 and dev_score >= 45: return 3
     elif naishin >= 2 and dev_score >= 35: return 2
     else: return 1
+# 🌟 追加: テキストのページ範囲から進捗ページ数を計算する関数
+def calc_pages_from_text(text):
+    if pd.isna(text): return 0
+    matches = re.findall(r'(\d+)\s*[~〜\-ー]\s*(\d+)', str(text))
+    total = 0
+    for start_str, end_str in matches:
+        total += abs(int(end_str) - int(start_str)) + 1
+    return total
