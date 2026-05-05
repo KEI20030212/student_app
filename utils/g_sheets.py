@@ -628,6 +628,102 @@ def load_price_master():
 
     return df
 
+#salary_dashboard.py
+def load_instructor_master():
+    """
+    スプレッドシートの「講師マスタ」シートのデータを読み込む
+    """
+    try:
+        # load_raw_data に "講師マスタ" というシート名を入れて呼び出すだけ！
+        df = load_raw_data("講師マスタ")
+        return df
+    except Exception as e:
+        print(f"講師マスタ読み込みエラー: {e}")
+        import pandas as pd
+        return pd.DataFrame() # エラーの時は空の表を返す
+
+def update_instructor_master(df_updated):
+    """
+    画面上で編集されたデータフレームを「講師マスタ」シートに全体上書き保存する
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("講師マスタ")
+        
+        # 1. 今シートにある古いデータを一旦まっさらにクリアする
+        ws.clear()
+        
+        # 2. DataFrameをスプレッドシートに書き込める形（リストのリスト）に変換する
+        # （1行目にヘッダー、2行目以降にデータが入る形になります）
+        data_to_write = [df_updated.columns.tolist()] + df_updated.values.tolist()
+        
+        # 3. A1セルを起点にして、新しいデータを一気にドーンと書き込む
+        # ※もしここでエラーが出る場合は、 gspreadのバージョンに合わせて ws.update('A1', data_to_write) に変更してみてください。
+        ws.update(data_to_write, 'A1') 
+        
+        # 4. Streamlitのキャッシュをクリアして、次回から最新状態が読み込まれるようにする
+        import streamlit as st
+        st.cache_data.clear()
+        
+    except Exception as e:
+        print(f"講師マスタ更新エラー: {e}")
+
+def publish_salary_data(year_month, df_summary):
+    """計算済みの給与データを「公開給与」シートに保存（上書き）する"""
+    try:
+        import pandas as pd
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        
+        # 🌟 1. シートの存在確認（なければ作成、あれば取得）
+        try:
+            worksheet = sh.worksheet("公開給与")
+        except gspread.exceptions.WorksheetNotFound:
+            # シートがない場合は新規作成（1行目にヘッダーを自動で入れる）
+            worksheet = sh.add_worksheet(title="公開給与", rows="100", cols="20")
+        
+        # 🌟 2. 既存の全データを取得
+        all_data = worksheet.get_all_records()
+        df_all = pd.DataFrame(all_data)
+        
+        # 🌟 3. 保存するデータに「年月」列を追加
+        df_to_save = df_summary.copy()
+        # 既存の「年月」列があれば一旦削除して、最新のものを先頭に差し込む
+        if '年月' in df_to_save.columns:
+            df_to_save = df_to_save.drop(columns=['年月'])
+        df_to_save.insert(0, '年月', year_month)
+        
+        # 🌟 4. 重複上書きロジック
+        if not df_all.empty and '年月' in df_all.columns:
+            # 今回保存する月「以外」のデータを残す
+            df_keep = df_all[df_all['年月'] != year_month]
+            # 残した過去データと、今回の新しいデータを合体
+            df_final = pd.concat([df_keep, df_to_save], ignore_index=True)
+        else:
+            df_final = df_to_save
+            
+        # 🌟 5. 【最重要】NaN（欠損値）を空文字("")に変換
+        # これがないと Google Sheets API は高確率でエラーになります
+        df_final = df_final.fillna("")
+        
+        # 全データが空の場合の安全策
+        if df_final.empty:
+            return False
+
+        # 🌟 6. スプレッドシートへの書き込み
+        worksheet.clear()
+        # カラム名とデータを合体させて更新
+        data_to_upload = [df_final.columns.values.tolist()] + df_final.values.tolist()
+        worksheet.update(values=data_to_upload, range_name="A1")
+        
+        return True
+        
+    except Exception as e:
+        import streamlit as st
+        # 詳細なエラー内容をコンソール（またはログ）に出力
+        print(f"給与公開エラー詳細: {e}")
+        return False
 
 #改良前
 @st.cache_data(ttl=60)
@@ -1064,46 +1160,6 @@ def add_new_textbook(new_name):
         st.error(f"🚨 新規テキストの裏側でエラー発生: {e}")
         return False
 
-def load_instructor_master():
-    """
-    スプレッドシートの「講師マスタ」シートのデータを読み込む
-    """
-    try:
-        # load_raw_data に "講師マスタ" というシート名を入れて呼び出すだけ！
-        df = load_raw_data("講師マスタ")
-        return df
-    except Exception as e:
-        print(f"講師マスタ読み込みエラー: {e}")
-        import pandas as pd
-        return pd.DataFrame() # エラーの時は空の表を返す
-
-def update_instructor_master(df_updated):
-    """
-    画面上で編集されたデータフレームを「講師マスタ」シートに全体上書き保存する
-    """
-    try:
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        ws = sh.worksheet("講師マスタ")
-        
-        # 1. 今シートにある古いデータを一旦まっさらにクリアする
-        ws.clear()
-        
-        # 2. DataFrameをスプレッドシートに書き込める形（リストのリスト）に変換する
-        # （1行目にヘッダー、2行目以降にデータが入る形になります）
-        data_to_write = [df_updated.columns.tolist()] + df_updated.values.tolist()
-        
-        # 3. A1セルを起点にして、新しいデータを一気にドーンと書き込む
-        # ※もしここでエラーが出る場合は、 gspreadのバージョンに合わせて ws.update('A1', data_to_write) に変更してみてください。
-        ws.update(data_to_write, 'A1') 
-        
-        # 4. Streamlitのキャッシュをクリアして、次回から最新状態が読み込まれるようにする
-        import streamlit as st
-        st.cache_data.clear()
-        
-    except Exception as e:
-        print(f"講師マスタ更新エラー: {e}")
-
 def get_all_teacher_names():
     """講師マスタから講師名のリストを取得して五十音順にする"""
     gc = get_gc_client() # 👈 先生の環境に合わせた接続！
@@ -1176,40 +1232,6 @@ def get_all_accounts(force_refresh=False):
 
     # ③ もし記憶があればそれをそのまま返すし、新しく取得した場合もそれを返す
     return st.session_state['all_accounts']
-def publish_salary_data(month_str, df_summary):
-    """教室長が計算した給与データを「給与公開用データ」シートに保存する"""
-    gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID) # 👈 先生の書き方で完璧です！
-        
-        # シートがなければ自動で作成
-        try:
-            ws = sh.worksheet("給与公開用データ")
-        except:
-            ws = sh.add_worksheet(title="給与公開用データ", rows=1000, cols=10)
-        
-        # 既存のデータを取得
-        records = ws.get_all_records()
-        df_existing = pd.DataFrame(records)
-        
-        # ⚠️ データ型の不一致によるエラーを防ぐため、一旦すべて文字(str)に変換
-        df_new = df_summary.astype(str).copy()
-        df_new['年月'] = month_str
-        
-        # 既に同じ月のデータがあれば削除して上書き
-        if not df_existing.empty and '年月' in df_existing.columns:
-            df_existing = df_existing[df_existing['年月'] != month_str]
-            
-        df_final = pd.concat([df_existing, df_new], ignore_index=True)
-        
-        # シートをクリアして最新データを書き込み
-        ws.clear()
-        ws.update([df_final.columns.values.tolist()] + df_final.fillna("").values.tolist())
-        
-    except Exception as e:
-        import streamlit as st
-        # 隠されてしまうエラーの正体を、直接画面に表示させます！
-        st.error(f"🚨 スプレッドシートの保存中にエラーが発生しました！原因: {e}")
 
 def add_new_account(user_id, password, teacher_name, role):
     """新しいアカウントをスプレッドシートに追加する"""
