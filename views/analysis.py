@@ -1,29 +1,31 @@
 import streamlit as st
 import pandas as pd
-import time # 🌟 APIエラー対策
-import gspread # 🌟 APIエラー対策
+import time 
+import gspread 
+
 from utils.g_sheets import (
-    load_all_data,
-    load_raw_data,          
-    overwrite_spreadsheet   
+    get_all_logs, # 🌟 生徒ごとの関数から、統合シート読み込み関数に変更！
+    load_quiz_records  
 )
 
-# 🌟 変更: 親から name を受け取るようにしました！
+# 🌟 APIガードをインポート
+from utils.api_guard import robust_api_call
+
 def render_analysis_page(name):
     # 🌟 APIエラー対策付きの読み込み
-    df_history = pd.DataFrame()
     with st.spinner("📊 データを取得中..."):
-        max_retries = 5
-        for attempt in range(max_retries):
-        #for attempt in range(3):
-            try:
-                df_history = load_all_data(name)
-                break
-            except Exception:
-                if attempt < max_retries - 1: 
-                    time.sleep(2 ** attempt)
-                #if attempt < 2: time.sleep(2)
+        # 1. 🌟 「授業ログ統合」シートの全データを取得
+        df_all_logs = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+        
+        # 2. 小テスト記録シートの全データ取得
+        df_all_quizzes = robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
+    # 🌟 全データの中から、現在の生徒のデータだけに絞り込み（フィルタリング）
+    df_history = pd.DataFrame()
+    if not df_all_logs.empty and '名前' in df_all_logs.columns:
+        df_history = df_all_logs[df_all_logs['名前'] == name].copy()
+
+    # --- 振替授業の計算 (df_historyを使用) ---
     if not df_history.empty and '出欠' in df_history.columns:
         absent_count = len(df_history[df_history['出欠'] == '欠席（後日振替あり）'])
         makeup_count = len(df_history[df_history['出欠'] == '出席（振替授業を消化）'])
@@ -33,51 +35,71 @@ def render_analysis_page(name):
         else:
             st.success("✅ 現在、未消化の振替授業はありません。")
 
-    tab_report, tab_history = st.tabs(["📊 グラフ＆レポート", "📚 過去の履歴 (直接編集)"])
+    tab_report, tab_history = st.tabs(["📊 グラフ＆レポート", "📚 過去の履歴"])
 
     with tab_report:
+        # --- ページ進捗グラフ (df_historyを使用) ---
         if df_history.empty: 
-            st.info("データがありません。")
+            st.info("進捗データがありません。")
         else:
-            df_history['日時'] = pd.to_datetime(df_history['日時'], format='mixed')
-            df_history = df_history.sort_values('日時')
-            col_g1, col_g2 = st.columns(2)
-            with col_g1: 
-                st.markdown("**📖 ページ進捗グラフ**")
+            st.markdown("**📖 ページ進捗グラフ**")
+            # 日付データを正しくソートするために変換
+            df_history['日時'] = pd.to_datetime(df_history['日時'], format='mixed', errors='coerce')
+            df_history = df_history.dropna(subset=['日時']).sort_values('日時')
+            
+            if 'ページ数' in df_history.columns:
                 st.line_chart(data=df_history, x="日時", y="ページ数")
-            with col_g2:
-                st.markdown("**💯 単元別小テスト点数**")
-                df_history['数値点数'] = pd.to_numeric(df_history['点数'], errors='coerce')
-                df_quiz = df_history.dropna(subset=['数値点数']).copy()
-                if not df_quiz.empty: st.bar_chart(data=df_quiz, x="単元", y="数値点数")
+            elif '終了ページ' in df_history.columns: # 列名が「終了ページ」の可能性があるための対応
+                df_history['終了ページ'] = pd.to_numeric(df_history['終了ページ'], errors='coerce')
+                st.line_chart(data=df_history.dropna(subset=['終了ページ']), x="日時", y="終了ページ")
+
+        st.divider()
+
+        # --- 🌟 小テスト点数グラフ (df_all_quizzesを使用) ---
+        st.markdown("**💯 テキスト別・単元別小テスト点数**")
+        
+        if df_all_quizzes.empty:
+            st.info("小テストの記録が見つかりません。")
+        else:
+            # 「名前」列で現在の生徒のみに絞り込み
+            df_student_quiz = df_all_quizzes[df_all_quizzes['名前'] == name].copy()
+            
+            if df_student_quiz.empty:
+                st.info(f"{name}さんの小テスト記録はまだありません。")
+            else:
+                # 「点数」列を数値に変換（エラーはNaNにする）
+                df_student_quiz['数値点数'] = pd.to_numeric(df_student_quiz['点数'], errors='coerce')
+                # グラフ表示用に、点数が入っていない行を削除
+                df_quiz_chart = df_student_quiz.dropna(subset=['数値点数'])
+                
+                if not df_quiz_chart.empty:
+                    # スプレッドシートの列名に合わせてテストごとにグラフを分ける
+                    target_column = "テキスト"  
+                    
+                    if target_column in df_quiz_chart.columns:
+                        text_names = df_quiz_chart[target_column].unique()
+                        
+                        for t_name in text_names:
+                            st.markdown(f"##### 📗 {t_name}")
+                            df_sub = df_quiz_chart[df_quiz_chart[target_column] == t_name]
+                            
+                            chart_x = "単元" if "単元" in df_sub.columns else "日時"
+                            st.bar_chart(data=df_sub, x=chart_x, y="数値点数")
+                    else:
+                        chart_x = "単元" if "単元" in df_quiz_chart.columns else "日時"
+                        st.bar_chart(data=df_quiz_chart, x=chart_x, y="数値点数")
+                else:
+                    st.info("有効な点数データがありません。")
 
     with tab_history:
-        # 🌟 APIエラー対策付きの生データ読み込み
-        raw_df = pd.DataFrame()
-        for attempt in range(max_retries):
-        #for attempt in range(3):
-            try:
-                raw_df = load_raw_data(name)
-                break
-            except Exception:
-                if attempt < max_retries - 1: 
-                    time.sleep(2 ** attempt)
-
-        if not raw_df.empty:
-            st.info("💡 以下の表のセルを直接クリックして書き換え、下の「上書き保存」ボタンを押してください。")
-            edited_df = st.data_editor(raw_df, num_rows="dynamic", use_container_width=True)
+        st.markdown("### 📚 過去の授業ログ")
+        
+        if not df_history.empty:
+            # 🚨 統合シート破壊を防ぐための安全ロック（読み取り専用表示）
+            st.info("💡 現在、データは全員分が「授業ログ統合」シートに集約されています。他の生徒のデータ上書きを防ぐため、ここからの直接編集はロックされています。修正が必要な場合はスプレッドシートを直接修正してください。")
             
-            if st.button("💾 上書き保存", type="primary"): 
-                with st.spinner("☁️ データを上書き保存中...（混雑時は自動で再試行します）"):
-                    # 🌟 APIエラー対策付きの保存
-                    for attempt in range(max_retries):
-                    #for attempt in range(3):
-                        try:
-                            overwrite_spreadsheet(name, edited_df)
-                            st.success("✨ データを上書き保存しました！")
-                            break
-                        except Exception:
-                            if attempt < max_retries - 1: 
-                                time.sleep(2 ** attempt)
-                            #if attempt < 2: time.sleep(2)
-                            else: st.error("保存に失敗しました。時間をおいてやり直してください。")
+            # 日時で降順（新しい順）に並び替えて見やすくする
+            df_display = df_history.sort_values(by="日時", ascending=False)
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"「授業ログ統合」シートに {name} さんの履歴は見つかりませんでした。")
