@@ -47,31 +47,28 @@ def get_student_logs(student_name):
     return student_df
 
 def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定"):
-    # 🌟 第一引数に student_id を追加しました
-    gc = get_gc_client() # 前回の cache_resource を使ったクライアント取得
+    gc = get_gc_client() 
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
     
-    # 全データを一気に取得（API節約のため）
     all_data = ws.get_all_values()
     header = all_data[0]
     
-    # 必要な列がなければ追加（ここは元のロジックを継承）
     required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分']
     for col in required_cols:
         if col not in header:
             ws.update_cell(1, len(header) + 1, col)
             header.append(col)
 
-    # 1. 生徒IDがA列（index 0）のどこにあるか探す
     row_index = -1
     for i, row in enumerate(all_data):
-        if row[0] == str(student_id): # IDが一致するか
-            row_index = i + 1 # 1-based index
+        if row[0] == str(student_id): 
+            row_index = i + 1 
             break
 
-    # 保存するデータの辞書を作成
-    # ヘッダー名と引数の値を紐付けます
+    # 🌟 改善ポイント1: 既存のデータを取得しておく（契約コースなどが消えるのを防ぐため）
+    existing_row = all_data[row_index - 1] if row_index != -1 else [""] * len(header)
+
     row_dict = {
         '生徒ID': str(student_id),
         '生徒名': name,
@@ -88,30 +85,46 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
         '学校区分': school_type
     }
 
-    # ヘッダーの順番通りにリストを作成
-    row_to_save = [row_dict.get(col, "") for col in header]
+    # 🌟 改善ポイント2: 辞書にない列（契約コースなど）は既存データをそのまま残す
+    row_to_save = []
+    for i, col in enumerate(header):
+        if col in row_dict:
+            row_to_save.append(row_dict[col])
+        else:
+            # 既存のデータがあればそれを、なければ空白を入れる
+            val = existing_row[i] if i < len(existing_row) else ""
+            row_to_save.append(val)
 
     if row_index != -1:
-        # 🌟 既存生徒の更新：1行まるごと一気に更新（update_cellを何度も呼ばない！）
-        # range は "A2:M2" のような形式
         range_label = f"A{row_index}:{gspread.utils.rowcol_to_a1(row_index, len(header))}"
         ws.update(range_name=range_label, values=[row_to_save])
         print(f"ID:{student_id} のデータを更新しました。")
     else:
-        # 🌟 新規生徒の追加
         ws.append_row(row_to_save)
         print(f"ID:{student_id} を新規登録しました。")
         
+    import streamlit as st
     st.cache_data.clear()
 
 @st.cache_data(ttl=3600) 
-def get_student_master():
+def get_student_master():#「生徒のリスト（名簿全体）」が欲しいときに使う
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
     df = pd.DataFrame(ws.get_all_records())
     # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
     return df
+
+@st.cache_data(ttl=60)
+def get_student_info(student_name):#「特定の生徒1人だけの詳細情報」が欲しいときに使う
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報")
+    records = ws.get_all_records()
+    for r in records:
+        if r.get('生徒名') == str(student_name):
+            return r
+    return {}
 
 def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
     # 🌟 生徒IDも表示するようにプリント文をパワーアップ！
@@ -151,16 +164,7 @@ def get_all_student_names():
         return [ws.title for ws in sh.worksheets() if ws.title not in exclude]
     except:
         return []
-@st.cache_data(ttl=60)
-def get_student_info(name):
-    gc = get_gc_client()
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet("設定_生徒情報")
-    records = ws.get_all_records()
-    for r in records:
-        if r.get('生徒名') == name:
-            return r
-    return {}
+
 @st.cache_data(ttl=60)
 def load_seating_data():
     """スプレッドシートから最新の座席情報を取得する"""
