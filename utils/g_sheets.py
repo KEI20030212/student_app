@@ -543,6 +543,91 @@ def delete_specific_log(student_id, student_name, date_str, period):
         print(f"削除エラー: {e}")
         return False
 
+#my_salary.py
+@st.cache_data(ttl=600)
+def load_published_salary():
+    """先生用のページで公開済みの給与データを読み込む"""
+    try:
+        gc = get_gc_client()
+        # 👇 読み込み処理をすべて try の中に入れるのが最大のポイント！
+        sh = gc.open_by_key(SPREADSHEET_ID) 
+        ws = sh.worksheet("給与公開用データ")
+        return pd.DataFrame(ws.get_all_records())
+        
+    except Exception as e:
+        # 🌟 もしシートが無い、APIエラーが起きたなどの場合はすべてここで受け止める
+        st.error("⚠️ 給与データの読み込みに失敗しました。スプレッドシートのIDや共有設定を確認してください。")
+        return pd.DataFrame() # 空のデータを返して連鎖エラーを防ぐ
+
+#tuition_dashboard.py
+@st.cache_data(ttl=3600)
+def load_billing_data(year_month):
+    """指定した年月の請求データを取得する"""
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    
+    try:
+        worksheet = sh.worksheet("請求管理")
+    except gspread.exceptions.WorksheetNotFound:
+        return pd.DataFrame()
+        
+    records = worksheet.get_all_records()
+    df = pd.DataFrame(records)
+    
+    if not df.empty and '年月' in df.columns:
+        ym_no_zero = year_month.replace("年0", "年") 
+        filtered_df = df[(df['年月'] == year_month) | (df['年月'] == ym_no_zero)]
+        return filtered_df
+        
+    return pd.DataFrame()
+
+def save_billing_data(year_month, edited_df):
+    """請求データを保存（上書き）する"""
+    import pandas as pd
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    worksheet = sh.worksheet("請求管理")
+    
+    all_data = worksheet.get_all_records()
+    df_all = pd.DataFrame(all_data)
+    
+    edited_df = edited_df.copy()
+    edited_df.insert(0, '年月', year_month)
+    
+    if not df_all.empty and '年月' in df_all.columns:
+        df_keep = df_all[df_all['年月'] != year_month]
+        df_final = pd.concat([df_keep, edited_df], ignore_index=True)
+    else:
+        df_final = edited_df
+        
+    df_final = df_final.fillna("")
+        
+    worksheet.clear()
+    worksheet.update([df_final.columns.values.tolist()] + df_final.values.tolist())
+    return True
+
+def load_price_master():
+    """料金マスタを読み込み、データの型を整えて取得する"""
+    df = pd.DataFrame() 
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("料金マスタ")
+    
+    data = ws.get_all_records()
+    df = pd.DataFrame(data)
+    
+    if not df.empty:
+        if '学年' in df.columns:
+            df['学年'] = df['学年'].astype(str).str.strip()
+        
+        for col in ['コマ数', '料金', '追加単価']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            else:
+                df[col] = 0
+
+    return df
+
 
 #改良前
 @st.cache_data(ttl=60)
@@ -1125,20 +1210,6 @@ def publish_salary_data(month_str, df_summary):
         import streamlit as st
         # 隠されてしまうエラーの正体を、直接画面に表示させます！
         st.error(f"🚨 スプレッドシートの保存中にエラーが発生しました！原因: {e}")
-@st.cache_data(ttl=600)
-def load_published_salary():
-    """先生用のページで公開済みの給与データを読み込む"""
-    try:
-        gc = get_gc_client()
-        # 👇 読み込み処理をすべて try の中に入れるのが最大のポイント！
-        sh = gc.open_by_key(SPREADSHEET_ID) 
-        ws = sh.worksheet("給与公開用データ")
-        return pd.DataFrame(ws.get_all_records())
-        
-    except Exception as e:
-        # 🌟 もしシートが無い、APIエラーが起きたなどの場合はすべてここで受け止める
-        st.error("⚠️ 給与データの読み込みに失敗しました。スプレッドシートのIDや共有設定を確認してください。")
-        return pd.DataFrame() # 空のデータを返して連鎖エラーを防ぐ
 
 def add_new_account(user_id, password, teacher_name, role):
     """新しいアカウントをスプレッドシートに追加する"""
@@ -1407,140 +1478,6 @@ def get_student_quiz_records(student_name):
     except Exception as e:
         print(f"小テスト記録の読み込みエラー: {e}")
         return [] # エラー時は空のリストを返す
-
-@st.cache_data(ttl=3600)
-def load_billing_data(year_month):
-    """指定した年月の請求データを取得する"""
-    # ⚠️ try...except での「エラーの握りつぶし」をやめ、
-    # 通信エラーは api_guard に任せてリトライさせます！
-    
-    gc = get_gc_client()
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    
-    try:
-        worksheet = sh.worksheet("請求管理")
-    except gspread.exceptions.WorksheetNotFound:
-        # 「シート自体がまだ作られていない場合」だけは、エラーではなく空データを返す
-        return pd.DataFrame()
-        
-    records = worksheet.get_all_records()
-    df = pd.DataFrame(records)
-    
-    if not df.empty and '年月' in df.columns:
-        # 💡 月の表記ゆらぎを吸収（例："2026年04月" と "2026年4月" どちらでもマッチするようにする）
-        ym_no_zero = year_month.replace("年0", "年") # "2026年04月" -> "2026年4月"
-        
-        # ゼロ埋めあり・なし、どちらかに一致するデータを抽出
-        filtered_df = df[(df['年月'] == year_month) | (df['年月'] == ym_no_zero)]
-        return filtered_df
-        
-    return pd.DataFrame()
-
-def save_billing_data(year_month, edited_df):
-    """請求データを保存（上書き）する"""
-    try:
-        import pandas as pd
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet("請求管理")
-        
-        # 既存の全データを取得
-        all_data = worksheet.get_all_records()
-        df_all = pd.DataFrame(all_data)
-        
-        # 保存するデータに「年月」列を追加
-        edited_df = edited_df.copy()
-        edited_df.insert(0, '年月', year_month)
-        
-        if not df_all.empty and '年月' in df_all.columns:
-            # 今回保存する月「以外」のデータを残す（＝該当月は上書きするため消す）
-            df_keep = df_all[df_all['年月'] != year_month]
-            # 残した過去データと、今回の新しいデータを合体
-            df_final = pd.concat([df_keep, edited_df], ignore_index=True)
-        else:
-            # まだ何もデータがない場合はそのまま保存
-            df_final = edited_df
-            
-        # 🌟 【ここを追加！】 nan（欠損値）をスプレッドシートが読めるように空文字("")に変換 🌟
-        df_final = df_final.fillna("")
-            
-        # スプレッドシートを一旦クリアして、新しいデータを全件書き込み
-        worksheet.clear()
-        # カラム名（ヘッダー）とデータをリスト化して更新
-        worksheet.update([df_final.columns.values.tolist()] + df_final.values.tolist())
-        return True
-    except Exception as e:
-        import streamlit as st
-        st.error(f"保存エラー: {e}")
-        return False
-@st.cache_data(ttl=3600) # 🌟 1時間記憶してAPI節約＆高速化！
-def load_price_master():
-    """料金マスタを読み込み、データの型を整えて取得する"""
-    df = pd.DataFrame() # 最初は空の箱を用意しておく
-    
-    # 🌟 魔法1：3回リトライ（粘り強さ）
-    for attempt in range(3): 
-        try:
-            gc = get_gc_client()
-            sh = gc.open_by_key(SPREADSHEET_ID)
-            ws = sh.worksheet("料金マスタ")
-            
-            # いったん生データを読み込む
-            data = ws.get_all_records()
-            df = pd.DataFrame(data)
-            
-            # データが取れたら、ループを抜けて次の「加工処理」へ進む
-            if not df.empty:
-                break 
-                
-        except Exception as e:
-            if attempt < 2: # 3回目じゃなければ息継ぎしてリトライ
-                time.sleep(2)
-            else:
-                # 3回ダメだった時だけエラーを表示
-                st.error(f"⚠️ 料金マスタの読み込みに失敗しました。通信状況を確認してください。: {e}")
-                return pd.DataFrame()
-
-    # 🌟 魔法2：データ加工（ここを丁寧にするのが「未設定」を防ぐコツ！）
-    if not df.empty:
-        try:
-            # 文字列の余計な空白を消す（「学年 」などを見逃さない！）
-            if '学年' in df.columns:
-                df['学年'] = df['学年'].astype(str).str.strip()
-            
-            # 数字に変換（変な文字が入っていてもエラーにせず、計算できるようにする）
-            for col in ['コマ数', '料金', '追加単価']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                else:
-                    # もし列自体がなかったら、0で埋めた列を作ってあげる（エラー防止）
-                    df[col] = 0
-                    
-        except Exception as e:
-            st.warning(f"⚠️ データの整形中にエラーが発生しました: {e}")
-
-    return df
-def get_student_master_data():
-    """設定_生徒情報から割引情報も含めて取得"""
-    try:
-        import pandas as pd
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet("設定_生徒情報")
-        df = pd.DataFrame(worksheet.get_all_records())
-        
-        master_dict = {}
-        for _, row in df.iterrows():
-            master_dict[row["生徒名"]] = {
-                "学年": row["学年"],
-                "学校区分": row["学校区分"],
-                "契約コース": row.get("契約コース", "未設定"),
-                "受験区分": row.get("受験区分", "未設定"),
-                "特別割引コマ": row.get("特別割引(コマ)", 0) # 🌟追加
-            }
-        return master_dict
-    except:
-        return {}
 
 def load_fixed_costs():
     """固定費（家賃など）を読み込む"""
