@@ -12,7 +12,13 @@ from utils.g_sheets import (
 from utils.api_guard import robust_api_call
 
 def render_analysis_page(name):
-    # 🌟 APIエラー対策付きの読み込み
+    if " - " in selected_student_option:
+        student_id = selected_student_option.split(" - ")[0]
+        name = selected_student_option.split(" - ")[1]
+    else:
+        student_id = "未設定"
+        name = selected_student_option
+        
     with st.spinner("📊 データを取得中..."):
         # 1. 🌟 「授業ログ統合」シートの全データを取得
         df_all_logs = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())

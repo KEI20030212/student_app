@@ -1,12 +1,13 @@
 import streamlit as st
 import time
-from utils.g_sheets import get_all_student_names
-from utils.g_sheets import get_student_info
+import pandas as pd
 
-# 完成している2つのファイルを部品として読み込む
+# 🌟 変更: get_all_student_names を削除し、マスター取得関数とAPIガードをインポート
+from utils.g_sheets import get_student_master, get_student_info
+from utils.api_guard import robust_api_call
+
 from views.student_details import render_student_details_page
 from views.analysis import render_analysis_page
-# 🌟 修正: 名前を正しく「render_conference_report」にしました
 from views.conference_report import render_conference_report
 
 def render_student_portal_page():
@@ -22,45 +23,30 @@ def render_student_portal_page():
     if is_conference_mode:
         st.caption("✅ 面談モードON（読取専用）※保護者と一緒に画面を見るためのモードです。")
 
-    # 🌟 変更: 生徒一覧の取得にも Exponential Backoff を適用
-    student_names = []
-    max_retries = 5
+    # ==========================================
+    # 🌟 変更: get_student_master を使って「ID - 名前」のリストを爆速で生成
+    # ==========================================
+    student_options = []
     with st.spinner("生徒データを読み込み中..."):
-        for attempt in range(max_retries):
-            try:
-                student_names = get_all_student_names()
-                # 取得できたらループを抜ける（空っぽのリストが返ってきた場合もエラーではないので抜ける）
-                if student_names is not None: 
-                    break
-            except Exception:
-                pass # エラーが起きても下に進んで待機する
+        df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+        if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:
+            # "S001 - 山田太郎" のリストを作る
+            student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
             
-            # 取得に失敗したら、待機時間を倍にして再チャレンジ (1秒, 2秒, 4秒, 8秒...)
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-                
-    if not student_names: 
-        st.warning("まだ生徒が登録されていません。")
+    if not student_options: 
+        st.warning("まだ生徒が登録されていないか、データの読み込みに失敗しました。")
         return
 
-    # 🌟 全機能共通の生徒選択バー
-    selected_student = st.selectbox("👤 対象の生徒を選択してください", ["-- 選択 --"] + student_names)
+    # 🌟 全機能共通の生徒選択バー（ID付きのリストを渡す）
+    selected_student = st.selectbox("👤 対象の生徒を選択してください", ["-- 選択 --"] + student_options)
 
-    # ==========================================
-    # 🌟 NEW! サイドバーに面談モードのスイッチを追加
-    # ==========================================
-    #st.sidebar.divider()
-    #is_conference_mode = st.sidebar.toggle("👨‍👩‍👦 面談モード", value=False)
-    
     if is_conference_mode:
         st.sidebar.success("✅ 面談モードON（読取専用）")
         st.sidebar.caption("※保護者と一緒に画面を見るためのモードです。")
     else:
         st.sidebar.info("✏️ 通常モード（入力・編集）")
 
-    # ==========================================
-
-    # 🌟 生徒が選ばれていない時の「機能紹介画面」！
+    # 🌟 生徒が選ばれていない時の「機能紹介画面」
     if selected_student == "-- 選択 --":
         st.info("👆 上のメニューから生徒を選択すると、以下の個別メニューが利用できます！")
         
@@ -87,17 +73,16 @@ def render_student_portal_page():
 
 
     # ==========================================
-    # 🌟 ここで「面談モード」と「通常モード」を分岐させます！
+    # 🌟 モードの分岐
     # ==========================================
     if is_conference_mode:
-        # 面談モードがONのとき：面談レポートだけを全画面に表示する
         with st.spinner("面談用データを準備中..."):
-            info = get_student_info(selected_student) # 面談画面で使うため情報を取得
+            # ここに渡る selected_student は "S001 - 山田太郎"
+            info = get_student_info(selected_student) 
             
         render_conference_report(selected_student, info)
         
     else:
-        # 面談モードがOFF（通常）のとき：いつものメニューを表示する
         app_mode = st.radio(
             "📂 表示するメニューを選んでください", 
             ["👤 生徒詳細・成績入力", "📊 個別分析・履歴・振替管理"], 
@@ -106,7 +91,6 @@ def render_student_portal_page():
         
         st.divider()
         
-        # 選ばれた機能に応じて、生徒名を渡しながら画面を呼び出す
         if app_mode == "👤 生徒詳細・成績入力":
             render_student_details_page(selected_student)
         else:
