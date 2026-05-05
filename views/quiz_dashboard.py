@@ -1,229 +1,214 @@
 import streamlit as st
 import pandas as pd
 import datetime
+import re # 🌟 追加: 正規表現用
 
 # ==========================================
-# 🌟 utils/g_sheets.py から新しい専用関数を呼び出し
+# 🌟 utils/g_sheets.py から専用関数を呼び出し
 # ==========================================
 from utils.g_sheets import (
-    get_all_student_names, 
-    get_textbook_master,
-    save_quiz_to_dedicated_sheet,        # 新しく追加した保存用関数
-    load_quiz_data_from_dedicated_sheet  # 新しく追加した読込用関数
+    get_student_master, 
+    get_quiz_master_dict,                
+    save_quiz_to_dedicated_sheet,        
+    load_quiz_records
 )
 
-# ==========================================
-# 🌟 APIエラー対策：キャッシュ（一時保存）機能
-# ==========================================
-@st.cache_data(ttl=600)  # 600秒(10分)間は再取得せず、手元のデータを使い回す
-def cached_get_student_names():
-    return get_all_student_names()
+from utils.api_guard import robust_api_call
 
-@st.cache_data(ttl=600)  # マスタデータも10分間キャッシュ
-def cached_get_textbook_master():
-    return get_textbook_master()
+# ==========================================
+# 🌟 APIエラー対策：キャッシュ機能 + 強化版APIコール
+# ==========================================
+@st.cache_data(ttl=600)  
+def cached_get_student_master():
+    return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=60)   # 小テスト記録データのキャッシュ
-def cached_load_quiz_data(student_name):
-    return load_quiz_data_from_dedicated_sheet(student_name)
+@st.cache_data(ttl=600)  
+def cached_get_quiz_details():
+    return robust_api_call(get_quiz_master_dict, fallback_value={})
+
+@st.cache_data(ttl=60)   
+def cached_load_all_quizzes():
+    return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
 # ==========================================
 
 def render_quiz_list_page():
     st.header("📝 小テスト進捗＆習熟度マップ")
-    st.write("縦軸がテキスト、横軸が章です。授業以外で実施したテスト結果もここから入力できます🎨")
+    st.write("実施した小テストの結果を入力・確認できるページです🎨")
 
-    # 1. 生徒の選択
-    student_names = cached_get_student_names()
-    selected_student = st.selectbox("👤 生徒を選択", ["-- 選択 --"] + student_names)
+    # 1. 🌟 生徒の選択（生徒マスターを使用）
+    df_students = cached_get_student_master()
     
-    if selected_student == "-- 選択 --":
+    if df_students.empty:
+        st.error("生徒データの取得に失敗しました。時間をおいて再読み込みしてください。")
         st.stop()
 
-    # マスタデータの読み込み
-    master_dict = cached_get_textbook_master()
+    # "S001 - 山田太郎" のリストを作成
+    student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
+    selected_student_option = st.selectbox("👤 生徒を選択", ["-- 選択 --"] + student_options)
+    
+    if selected_student_option == "-- 選択 --":
+        st.stop()
+
+    # 🌟 IDと名前を分割
+    student_id = selected_student_option.split(" - ")[0]
+    student_name = selected_student_option.split(" - ")[1]
+
+    # 2. 小テスト設定の取得
+    quiz_details = cached_get_quiz_details()
+    
+    quiz_names = []
+    for key in quiz_details.keys():
+        if "_" in key:
+            q_name = key.split("_", 1)[0]
+            if q_name not in quiz_names:
+                quiz_names.append(q_name)
 
     # ==========================================
-    # 🌟 【新機能】小テスト結果の入力フォーム
+    # 🌟 小テスト結果の入力フォーム
     # ==========================================
-    with st.expander("📝 小テスト結果を登録する（授業以外・自習など）"):
-        st.write(f"**{selected_student}** さんのテスト結果を入力します。")
+    with st.expander("📝 小テスト結果を登録する"):
+        st.write(f"**{student_name}** さんの結果を入力します。") # 名前だけを表示
         
         with st.form("quiz_input_form"):
             col1, col2 = st.columns(2)
             
-            # テキスト選択
-            textbooks = list(master_dict.keys())
-            target_text = col1.selectbox("📚 テキスト", textbooks)
-            
-            # 章の選択（選択したテキストに基づいてリストを変える）
-            chapters = master_dict.get(target_text, [])
-            target_chap = col2.selectbox("📖 章・単元", chapters)
-            
-            col3, col4 = st.columns(2)
-            # 🌟 ミス問題番号の入力
-            w_nums = col3.text_input("❌ ミス問題番号 (カンマ区切りで入力)", placeholder="例: 1, 3, 5")
-            # 実施日
-            test_date = col4.date_input("📅 実施日", datetime.date.today())
-            
-            submit_quiz = st.form_submit_button("この内容で記録する ✨", type="primary")
-            
-            if submit_quiz:
-                # 🌟 点数の自動計算 (ミス1問につき-10点)
-                if not w_nums.strip():
-                    score = 100
-                    miss_count = 0
-                else:
-                    miss_count = len([x for x in w_nums.split(",") if x.strip()])
-                    score = max(0, 100 - (miss_count * 10))
-
-                with st.spinner("記録中..."):
-                    # 🌟 専用シート用の関数に変更！(実施形態は"自習"として記録)
-                    success = save_quiz_to_dedicated_sheet(
-                        test_date.strftime("%Y/%m/%d"), 
-                        selected_student, 
-                        target_text, 
-                        target_chap, 
-                        score,
-                        w_nums,
-                        "自習"
-                    )
-                    
-                    if success:
-                        st.success(f"【{target_text} {target_chap}】を {score}点（ミス{miss_count}問）で記録しました！")
-                        # キャッシュをクリアして最新データを読み込めるようにする
-                        cached_load_quiz_data.clear()
-                        # 画面を更新してグラフに反映
-                        st.rerun()
+            if not quiz_names:
+                st.warning("「設定_小テスト一覧」のデータが取得できません。")
+                st.form_submit_button("記録不可", disabled=True)
+            else:
+                target_quiz = col1.selectbox("📝 小テスト名", quiz_names)
+                target_unit = col2.number_input("📖 単元・回", min_value=1, value=1, step=1)
+                
+                max_score = 100
+                for k, v in quiz_details.items():
+                    if k.startswith(f"{target_quiz}_"):
+                        max_score = int(v.get("full_marks", 100))
+                        break
+                
+                col3, col4 = st.columns(2)
+                score = col3.number_input(f"💯 点数 (満点: {max_score})", min_value=0, max_value=max_score, value=max_score, step=1)
+                test_date = col4.date_input("📅 実施日", datetime.date.today())
+                
+                submit_quiz = st.form_submit_button("この内容で記録する ✨", type="primary")
+                
+                if submit_quiz:
+                    if target_unit < 1:
+                        st.error("⚠️ 「単元・回」を入力してください。")
                     else:
-                        st.error("記録に失敗しました。スプレッドシートを確認してください。")
+                        with st.spinner("記録中..."):
+                            success = robust_api_call(
+                                save_quiz_to_dedicated_sheet,
+                                test_date.strftime("%Y/%m/%d"), 
+                                student_name,  # 🌟 注意: スプレッドシートには「名前」だけを保存する！
+                                target_quiz,  
+                                target_unit,  
+                                score,
+                                "", 
+                                "自習",
+                                fallback_value=False
+                            )
+                            
+                            if success:
+                                st.success(f"【{target_quiz} - {target_unit}】を {score}点で記録しました！")
+                                cached_load_all_quizzes.clear() # 🌟 キャッシュをクリアして最新を読み込ませる
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("記録に失敗しました。")
 
     st.divider()
 
     # ==========================================
-    # 🌟 以降、習熟度マップの表示ロジック
+    # 🌟 習熟度マップの表示ロジック
     # ==========================================
     with st.spinner("習熟度データを集計中..."):
-        # 🌟 ここも専用シートから読み込むように変更！
-        df_quiz = cached_load_quiz_data(selected_student)
+        # 🌟 全データを一括で取得してから、選んだ生徒の分だけ抜き出す！
+        df_all_quizzes = cached_load_all_quizzes()
         
-        flat_data = []
-        for text_name, chaps in master_dict.items():
-            for chap in chaps:
-                flat_data.append({'テキスト': text_name, '章': chap})
-                
-        df_master = pd.DataFrame(flat_data, columns=['テキスト', '章'])
-
-        if df_master.empty:
-            st.warning("⚠️ マスタデータが読み込めませんでした。")
+        if "APIエラー発生" in df_all_quizzes.columns:
+            st.error("データの取得中にエラーが発生しました。")
             st.stop()
-
+            
+        # 選んだ生徒の名前でフィルタリング
+        if not df_all_quizzes.empty and '名前' in df_all_quizzes.columns:
+            df_quiz = df_all_quizzes[df_all_quizzes['名前'] == student_name].copy()
+        else:
+            df_quiz = pd.DataFrame()
+        
         if df_quiz.empty:
-            st.warning("小テストの記録がまだありません。")
+            st.info("小テストの記録がまだありません。結果を登録するとここに表が表示されます。")
             st.stop()
 
-        # 点数を数値に変換
         df_quiz['点数'] = pd.to_numeric(df_quiz['点数'], errors='coerce')
         df_quiz = df_quiz.dropna(subset=['点数']).copy()
-
-        # 3. 前回小テスト日の表示
+        
         if not df_quiz.empty:
             df_quiz['日時'] = pd.to_datetime(df_quiz['日時'], format='mixed', errors='coerce')
             last_date = df_quiz['日時'].max().strftime("%Y年%m月%d日")
-            st.success(f"📅 前回小テスト実施日: **{last_date}**")
-        else:
-            st.info("📅 まだ小テストの記録がありません。")
+            st.success(f"📅 前回実施日: **{last_date}**")
 
-        # 4. マスタと合体
         best_scores = df_quiz.groupby(['テキスト', '単元'])['点数'].max().reset_index()
-        best_scores = best_scores.rename(columns={'単元': '章', '点数': '最高点数'})
+        best_scores = best_scores.rename(columns={'テキスト': '小テスト名', '点数': '最高点数'})
 
-        df_master['章_clean'] = df_master['章'].astype(str).str.replace('第', '').str.replace('章', '').str.strip()
-        best_scores['章_clean'] = best_scores['章'].astype(str).str.replace('第', '').str.replace('章', '').str.strip()
-
-        df_merged = pd.merge(df_master, best_scores, left_on=['テキスト', '章_clean'], right_on=['テキスト', '章_clean'], how='left', suffixes=('', '_score'))
-
-        # 🌟 タブの生成
-        textbook_names = df_master['テキスト'].unique().tolist()
+        quiz_list = best_scores['小テスト名'].unique().tolist()
         
-        if not textbook_names:
-            st.warning("テキスト一覧が見つかりません。")
+        if not quiz_list:
             st.stop()
+            
+        tabs = st.tabs(quiz_list)
 
-        tabs = st.tabs(textbook_names)
+        def sort_key(c):
+            nums = re.findall(r'\d+', str(c))
+            return int(nums[0]) if nums else 999
 
-        # 各テキストごとにタブの中身を作っていく
-        for i, text_name in enumerate(textbook_names):
+        for i, q_name in enumerate(quiz_list):
             with tabs[i]: 
-                df_text = df_merged[df_merged['テキスト'] == text_name]
+                df_display = best_scores[best_scores['小テスト名'] == q_name]
                 
-                # --- 🎯 達成率の計算 ---
-                total_chaps = len(df_text)
-                done_chaps = df_text['最高点数'].notna().sum()
-                
-                if total_chaps > 0:
-                    progress_rate = int((done_chaps / total_chaps) * 100)
-                else:
-                    progress_rate = 0
-                
-                st.subheader(f"📊 達成率: {progress_rate}% ({done_chaps}/{total_chaps}章クリア)")
-                st.progress(progress_rate / 100.0)
-                st.write("") 
-
-                # --- 🎨 表の作成 ---
-                pivot_df = df_text.pivot_table(
-                    index='テキスト', 
-                    columns='章', 
+                pivot_df = df_display.pivot_table(
+                    index='小テスト名', 
+                    columns='単元', 
                     values='最高点数', 
                     aggfunc='max'
                 )
                 
                 if pivot_df.empty:
-                    st.info("このテキストのテスト記録はまだありません。")
                     continue
-                
-                import re
-                def sort_chapter_key(col_name):
-                    nums = re.findall(r'\d+', str(col_name))
-                    if nums:
-                        return int(nums[0])
-                    return 9999
 
-                sorted_cols = sorted(pivot_df.columns.tolist(), key=sort_chapter_key)
-                pivot_df = pivot_df[sorted_cols]
+                pivot_df = pivot_df[sorted(pivot_df.columns.tolist(), key=sort_key)]
 
-                # --- ✨ アイコン化＆カラーリング ---
-                def add_icon_to_score(val):
-                    if pd.isna(val) or val == "":
-                        return ""
+                def add_icon(val):
+                    if pd.isna(val) or val == "": return ""
+                    
+                    full_m = 100
+                    for k, v in quiz_details.items():
+                        if k.startswith(f"{q_name}_"):
+                            full_m = float(v.get("full_marks", 100))
+                            break
+                            
                     try:
                         v = float(val)
-                        if v == 100: return f"👑 100"
-                        elif v >= 80: return f"🟢 {int(v)}"
-                        elif v >= 60: return f"🟡 {int(v)}"
+                        ratio = v / full_m if full_m > 0 else 0
+                        if ratio >= 1.0: return f"👑 {int(v)}"
+                        elif ratio >= 0.8: return f"🟢 {int(v)}"
+                        elif ratio >= 0.6: return f"🟡 {int(v)}"
                         else: return f"🔴 {int(v)}"
                     except:
                         return str(val)
 
-                display_df = pivot_df.copy()
-                for col in display_df.columns:
-                    display_df[col] = display_df[col].map(add_icon_to_score)
+                styled_display = pivot_df.copy()
+                for col in styled_display.columns:
+                    styled_display[col] = styled_display[col].apply(add_icon)
 
-                def color_score_bg(val):
-                    val_str = str(val)
-                    if "👑" in val_str:
-                        return 'background-color: #fffacd; color: #000000; font-weight: bold;'
-                    elif "🟢" in val_str:
-                        return 'background-color: #c6efce; color: #006100; font-weight: bold;'
-                    elif "🟡" in val_str:
-                        return 'background-color: #ffeb9c; color: #9c6500; font-weight: bold;'
-                    elif "🔴" in val_str:
-                        return 'background-color: #ffc7ce; color: #9c0006; font-weight: bold;'
+                def color_bg(v):
+                    if "👑" in str(v): return 'background-color: #fffacd; color: #000; font-weight: bold;'
+                    if "🟢" in str(v): return 'background-color: #c6efce; color: #006100;'
+                    if "🟡" in str(v): return 'background-color: #ffeb9c; color: #9c6500;'
+                    if "🔴" in str(v): return 'background-color: #ffc7ce; color: #9c0006;'
                     return ''
 
                 try:
-                    styled_df = display_df.style.map(color_score_bg)
+                    st.dataframe(styled_display.style.applymap(color_bg), use_container_width=True)
                 except AttributeError:
-                    styled_df = display_df.style.applymap(color_score_bg)
-                
-                st.dataframe(styled_df, use_container_width=True)
+                    st.dataframe(styled_display.style.map(color_bg), use_container_width=True)
