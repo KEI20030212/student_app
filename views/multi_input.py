@@ -208,7 +208,7 @@ def render_multi_input_page(textbook_master):
                                             st.session_state[cache_key] = {
                                                 "note": robust_api_call(get_last_handover, name, subject),
                                                 "hw_info": robust_api_call(get_last_homework_info, name, subject),
-                                                "page": robust_api_call(get_last_page_from_sheet, name)
+                                                "page": robust_api_call(get_last_page_from_sheet, name, subject)
                                             }
                                     
                                     cached_data = st.session_state[cache_key]
@@ -219,8 +219,12 @@ def render_multi_input_page(textbook_master):
                                     # 数字以外（"プリント"等）が入っている場合の安全対策
                                     last_page_num = int(last_page) if str(last_page).isdigit() else 0
 
+                                    formatted_last_page = str(last_page).replace('\n', '  \n')
+
+                                    # 🌟 変更: 表示パネルに「前回の授業進捗」を追加！
                                     st.info(
-                                        f"💡 **【前回 ({subject}) の引継ぎ・宿題】**\n\n"
+                                        f"💡 **【前回 ({subject}) の引継ぎ・宿題・進捗】**\n\n"
+                                        f"📖 **前回の授業進捗:**  \n{formatted_last_page}\n\n"
                                         f"📚 **宿題テキスト:** {last_hw_text}\n"
                                         f"🎯 **宿題の範囲:** {last_hw_pages}\n\n"
                                         f"💬 **引継ぎメモ:**\n{last_note}"
