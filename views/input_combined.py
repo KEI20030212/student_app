@@ -6,10 +6,15 @@ from views.self_study_input import render_self_study_input_page
 def render_combined_input_page():
     st.header("📝 授業・自習記録の入力")
 
-    tab1, tab2 = st.tabs(["📖 授業", "📝 自習"])
-    
-    with tab1:
+    record_type = st.radio(
+        "✍️ 記録の種類を選択してください", 
+        ["📖 授業記録", "📝 自習記録"], 
+        horizontal=True, 
+        key="record_type_combined"
+    )
+    st.divider()
+
+    if record_type == "📖 授業記録":
         render_multi_input_page()
-        
-    with tab2:
+    elif record_type == "📝 自習記録":
         render_self_study_input_page()
