@@ -1,16 +1,14 @@
-# views/account_manager.py
-
 import streamlit as st
 import pandas as pd
-from utils.g_sheets import get_all_accounts, add_new_account, delete_account
+from utils.g_sheets import get_all_accounts, add_new_account, delete_account, update_account_role
 
 # 🌟 追加: アカウント管理画面もAPIガードで鉄壁に守る！
 from utils.api_guard import robust_api_call
 
 def render_account_manager_page():
-    # 念のための最強のセキュリティロック（URL等で直接アクセスされた時用）
-    if st.session_state.get('role') != 'admin':
-        st.error("⛔ このページは教室長（管理者）専用です。")
+    allowed_roles = ['admin', 'owner', 'am']
+    if st.session_state.get('role') not in allowed_roles:
+        st.error("⛔ このページは管理者専用です。")
         return
     if 'toast_msg' in st.session_state:
         st.toast(st.session_state['toast_msg'], icon="✨")
@@ -18,19 +16,19 @@ def render_account_manager_page():
 
     st.header("⚙️ アカウント・システム設定")
     
-    # 🌟 変更: アカウント一覧の取得を robust_api_call で保護
     with st.spinner("アカウント情報を取得中..."):
         accounts_dict = robust_api_call(get_all_accounts, fallback_value={})
     
+    role_mapping = {
+        "owner": "👑 オーナー",
+        "admin": "🏢 教室長",
+        "am": "👔 AM",
+        "head_teacher": "🎓 主任講師",
+        "teacher": "👩‍🏫 講師"
+    }
+
     st.subheader("👥 登録済みアカウント一覧")
     if accounts_dict:
-        role_mapping = {
-            "owner": "👑 オーナー",
-            "admin": "🏢 教室長",
-            "am": "👔 AM",
-            "head_teacher": "🎓 主任講師",
-            "teacher": "👩‍🏫 講師"
-        }
         # 辞書型をデータフレームに変換して見やすくする
         account_list = []
         for uid, data in accounts_dict.items():
@@ -50,7 +48,9 @@ def render_account_manager_page():
 
     st.divider()
 
-    # 2. 新規アカウント追加フォーム
+    # ==========================================
+    # 1. 新規アカウント追加フォーム
+    # ==========================================
     st.subheader("➕ 新規アカウントの作成")
     st.info("💡 【重要】「講師名」は、給与ダッシュボードで設定した名前と一言一句同じにしてください。（スペースの有無などに注意）")
     
@@ -61,17 +61,11 @@ def render_account_manager_page():
             new_name = st.text_input("🏷️ 講師名 (例: 田中 太郎)")
         with col2:
             new_pass = st.text_input("🔑 初期パスワード", type="password")
-            role_mapping = {
-                "owner": "👑 オーナー",
-                "admin": "🏢 教室長",
-                "am": "👔 AM",
-                "head_teacher": "🎓 主任講師",
-                "teacher": "👩‍🏫 講師"
-            }
             new_role = st.selectbox(
                 "🛡️ 権限", 
                 options=["owner", "admin", "am", "head_teacher", "teacher"], 
-                format_func=lambda x: role_mapping[x]
+                format_func=lambda x: role_mapping[x],
+                index=4 # デフォルトを「講師」にする
             )
             
         submit_btn = st.form_submit_button("✨ この内容でアカウントを作成する", use_container_width=True)
@@ -83,7 +77,6 @@ def render_account_manager_page():
             elif new_id in accounts_dict:
                 st.error(f"⚠️ ユーザーID「{new_id}」は既に使われています。別のIDにしてください。")
             else:
-                # 🌟 変更: 登録処理を robust_api_call で保護
                 with st.spinner("スプレッドシートに登録中..."):
                     success = robust_api_call(add_new_account, new_id, new_pass, new_name, new_role, fallback_value=False)
                 
@@ -91,14 +84,46 @@ def render_account_manager_page():
                     get_all_accounts.clear()
                     # 成功メッセージを表示（toastは画面右下にフワッと出ます）
                     st.session_state['toast_msg'] = f"✅ {new_name} 先生のアカウントを作成しました！"
-                    
-                    # 画面を再起動して最新のリストを再読み込み
                     st.rerun()
                 else:
                     st.error("❌ アカウントの作成に失敗しました。通信状況を確認してください。")
+
+    # ==========================================
+    # 🌟 2. 新規追加: アカウント権限の変更
+    # ==========================================
+    st.divider()
+    st.subheader("🔄 アカウント権限の変更")
+
+    if accounts_dict:
+        # 現在の権限も表示して分かりやすくする (例: "user01 (田中 太郎) - 現在: 👩‍🏫 講師")
+        edit_options = [f"{uid} ({data.get('講師名', '名無し')}) - 現在: {role_mapping.get(data.get('権限', 'teacher'), '不明')}" for uid, data in accounts_dict.items()]
+
+        with st.form("edit_role_form"):
+            selected_to_edit = st.selectbox("権限を変更するアカウントを選択", options=edit_options)
+            
+            update_role = st.selectbox(
+                "🛡️ 新しい権限", 
+                options=["owner", "admin", "am", "head_teacher", "teacher"], 
+                format_func=lambda x: role_mapping[x]
+            )
+
+            update_btn = st.form_submit_button("🔄 このアカウントの権限を更新する", type="primary")
+
+            if update_btn:
+                target_id = selected_to_edit.split(" ")[0]
+
+                with st.spinner("権限を更新中..."):
+                    success = robust_api_call(update_account_role, target_id, update_role, fallback_value=False)
+                
+                if success:
+                    get_all_accounts.clear()
+                    st.session_state['toast_msg'] = f"🔄 アカウント「{target_id}」の権限を【 {role_mapping[update_role]} 】に変更しました。"
+                    st.rerun()
+                else:
+                    st.error("❌ 権限の更新に失敗しました。")
                     
     # ==========================================
-    # 🌟 3. 新規追加: アカウント削除機能
+    # 3. アカウント削除機能
     # ==========================================
     st.divider()
     st.subheader("🗑️ アカウントの削除")
@@ -114,7 +139,7 @@ def render_account_manager_page():
             # 間違えて消さないようにチェックボックスでワンクッション置く
             confirm_delete = st.checkbox("本当に削除してよろしいですか？")
             
-            delete_btn = st.form_submit_button("🗑️ アカウントを削除する", type="primary")
+            delete_btn = st.form_submit_button("🗑️ アカウントを削除する") # 削除ボタンの色を通常にする(誤爆防止)
             
             if delete_btn:
                 if not confirm_delete:
@@ -124,10 +149,9 @@ def render_account_manager_page():
                     target_id = selected_to_delete.split(" ")[0]
                     
                     # ログイン中の自分自身のアカウントは消せないようにする（事故防止）
-                    if target_id == st.session_state.get('username'): 
+                    if target_id == st.session_state.get('user_id'): 
                         st.error("⛔ 自分自身のアカウントは削除できません！")
                     else:
-                        # 🌟 変更: 削除処理を robust_api_call で保護
                         with st.spinner("アカウントを削除中..."):
                             success = robust_api_call(delete_account, target_id, fallback_value=False)
                         
