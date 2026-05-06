@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import time 
-import gspread 
 
 from utils.g_sheets import (
     get_all_logs, # 🌟 生徒ごとの関数から、統合シート読み込み関数に変更！
@@ -11,13 +10,17 @@ from utils.g_sheets import (
 # 🌟 APIガードをインポート
 from utils.api_guard import robust_api_call
 
-def render_analysis_page(name):
-    if " - " in selected_student_option:
-        student_id = selected_student_option.split(" - ")[0]
-        name = selected_student_option.split(" - ")[1]
+# 🌟 修正: 引数名を selected_student に変更
+def render_analysis_page(selected_student=None):
+    
+    # 🌟 修正: 受け取った引数がID付きかどうかを判定して安全に分割
+    if selected_student and " - " in selected_student: 
+        student_id = selected_student.split(" - ")[0]
+        name = selected_student.split(" - ")[1]
     else:
+        # 万が一「山田太郎」のようにIDがついていない古いデータが来た時の保険
+        name = selected_student
         student_id = "未設定"
-        name = selected_student_option
         
     with st.spinner("📊 データを取得中..."):
         # 1. 🌟 「授業ログ統合」シートの全データを取得
