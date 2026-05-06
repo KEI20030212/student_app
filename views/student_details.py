@@ -58,12 +58,13 @@ def render_student_details_page(selected_student_option):
             st.markdown(f"### 📝 {selected_student} さんのプロフィール")
             st.markdown(f"**🎓 学年**: {info.get('学年', '') or '未設定'}")
             
-            # 🌟 表示時も空欄に対応
             disp_exam = info.get('受験区分', '')
-            st.markdown(f"**🔥 受験区分**: {disp_exam if disp_exam else '（空欄）'}")
+            if disp_exam:
+                st.markdown(f"**🔥 受験区分**: {disp_exam}")
             
             disp_school = info.get('学校区分', '')
-            st.markdown(f"**🏫 学校区分**: {disp_school if disp_school else '（空欄）'}")
+            if disp_school:
+                st.markdown(f"**🏫 学校区分**: {disp_school}")
             
             st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
             st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
