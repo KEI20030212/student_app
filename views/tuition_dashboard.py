@@ -5,7 +5,6 @@ import re
 import unicodedata 
 
 from utils.api_guard import robust_api_call
-# 🌟 変更: 個別データ取得関数を全削除し、一括取得関数に統一
 from utils.g_sheets import (
     get_all_logs, 
     get_student_master,
@@ -31,28 +30,29 @@ def cached_load_price_master():
 def render_tuition_dashboard_page():
     st.header("💴 月謝（請求額）管理ダッシュボード")
 
-    # --- 1. 基本マスタデータの取得（たった2回の通信！） ---
+    # --- 1. 基本マスタデータの取得 ---
     df_students = cached_get_student_master()
     price_master = cached_load_price_master()
     
-    # 🌟 ゆらぎ補正
+    # 🌟 ゆらぎ補正 (新しく追加した「コース」列も補正対象に！)
     if not price_master.empty and '学年' in price_master.columns and 'コマ数' in price_master.columns:
         price_master['学年'] = price_master['学年'].astype(str).apply(lambda x: unicodedata.normalize('NFKC', x).strip())
         price_master['コマ数'] = pd.to_numeric(price_master['コマ数'], errors='coerce').fillna(0).astype(int)
         
+        if 'コース' in price_master.columns:
+            price_master['コース'] = price_master['コース'].astype(str).apply(lambda x: unicodedata.normalize('NFKC', x).strip())
         if '受験区分' in price_master.columns:
             price_master['受験区分'] = price_master['受験区分'].astype(str).apply(lambda x: unicodedata.normalize('NFKC', x).strip())
         if '学校区分' in price_master.columns:
             price_master['学校区分'] = price_master['学校区分'].astype(str).apply(lambda x: unicodedata.normalize('NFKC', x).strip())
 
-    # --- 2. 授業データの集計と年月リストの作成（統合シートから一括取得！） ---
+    # --- 2. 授業データの集計と年月リストの作成 ---
     month_options = ["データなし"]
     
     with st.spinner("☁️ 授業データを集計中...（超高速🚀）"):
         df_all_logs = cached_get_all_logs()
         
     if not df_all_logs.empty and "APIエラー発生" not in df_all_logs.columns and '日時' in df_all_logs.columns:
-        # 🌟 列名の揺れを吸収
         name_col = '名前' if '名前' in df_all_logs.columns else '生徒名'
         df_all_logs = df_all_logs.rename(columns={name_col: '生徒名'})
         
@@ -72,7 +72,7 @@ def render_tuition_dashboard_page():
         
     with col_btn:
         if st.button("🔄 最新データに更新", type="primary", use_container_width=True):
-            st.cache_data.clear() # 🌟 アプリ全体のキャッシュを綺麗にリセット
+            st.cache_data.clear()
             st.toast("最新の授業データと料金マスタを取得します...", icon="⏳")
             time.sleep(0.5)
             st.rerun()
@@ -94,15 +94,12 @@ def render_tuition_dashboard_page():
     st.subheader(f"👤 {selected_month} の請求設定")
     force_recalc = st.checkbox("🔄 過去の保存データを無視して、現在の料金マスタで強制的に再計算する")
 
-    # その月の受講コマ数を集計
     actual_koma_dict = df_month['生徒名'].value_counts().to_dict()
-    
     saved_billing_df = robust_api_call(load_billing_data, selected_month, fallback_value=pd.DataFrame())
 
     table_data = []
     missing_master_warnings = [] 
 
-    # 🌟 DataFrame化されたマスターを使ってループ
     for _, m_info in df_students.iterrows():
         student = str(m_info.get("生徒名", "")).strip()
         if not student: continue
@@ -133,30 +130,65 @@ def render_tuition_dashboard_page():
             except:
                 pass
 
-        try:
-            koma_nums = re.findall(r'\d+', course)
-            base_koma = int(koma_nums[0]) if koma_nums else 0
-        except:
-            base_koma = 0
-            
-        actual_extra_count = max(0, actual_koma - base_koma)
+        # 🤖 【新機能】複数コースを自動パースして計算する超賢いロジック
+        course_list = []
+        if course and course != "未設定":
+            # "Bコース:4, Qコース:4" のような文字列をカンマや読点で分割
+            for part in course.replace('、', ',').replace('＋', ',').replace('+', ',').split(','):
+                part = part.strip()
+                if not part: continue
+                
+                # 数字（コマ数）を取り出す
+                nums = re.findall(r'\d+', part)
+                if nums:
+                    koma = int(nums[0])
+                    # 数字以外の部分（コース名）を取り出す（「:」や「-」は除去）
+                    name_match = re.match(r'^([^0-9:：\-]+)', part)
+                    c_name = name_match.group(1).strip() if name_match else "未設定"
+                    course_list.append({"name": c_name, "koma": koma})
+
+        total_base_price = 0
+        total_base_koma = 0
+        max_extra_unit_price = 0 # 複数コースを受講している場合、追加コマは一番高い単価を採用する
         
-        match = pd.DataFrame()
-        if not price_master.empty and '学年' in price_master.columns and 'コマ数' in price_master.columns:
-            mask = (price_master['学年'] == grade) & (price_master['コマ数'] == base_koma)
-            if '受験区分' in price_master.columns: mask = mask & (price_master['受験区分'] == exam_status)
-            if '学校区分' in price_master.columns: mask = mask & (price_master['学校区分'] == school_type)
-            match = price_master[mask]
-        
-        if not match.empty:
-            base_price = int(match.iloc[0]['料金'])
-            unit_extra_price = int(match.iloc[0]['追加単価'])
+        # コースごとに料金マスタを検索して合算
+        if course_list:
+            for c in course_list:
+                c_name = c["name"]
+                c_koma = c["koma"]
+                
+                mask = (price_master['学年'] == grade) & (price_master['コマ数'] == c_koma)
+                if 'コース' in price_master.columns and c_name != "未設定":
+                    mask &= (price_master['コース'] == c_name)
+                if '受験区分' in price_master.columns: mask &= (price_master['受験区分'] == exam_status)
+                if '学校区分' in price_master.columns: mask &= (price_master['学校区分'] == school_type)
+                
+                match_df = price_master[mask]
+                
+                if not match_df.empty:
+                    total_base_price += int(match_df.iloc[0]['料金'])
+                    total_base_koma += c_koma
+                    
+                    # 追加単価を取得（複数の場合は一番高いものを記憶）
+                    extra_price = int(match_df.iloc[0]['追加単価'])
+                    if extra_price > max_extra_unit_price:
+                        max_extra_unit_price = extra_price
+                else:
+                    missing_master_warnings.append(f"{student} さん ({c_name} {c_koma}コマ / 学年: {grade})")
+                    total_base_koma += c_koma # マスタになくても契約コマ数としては合算しておく（追加コマの暴走防止）
         else:
-            missing_master_warnings.append(f"{student} さん (学年: {grade}, コマ数: {base_koma}, 受験区分: {exam_status}, 学校区分: {school_type})")
-            base_price, unit_extra_price = 0, 0
-            
-        discount_amount = discount_koma * unit_extra_price
-        calculated_price = max(0, base_price + (actual_extra_count * unit_extra_price) - discount_amount)
+            # コースが設定されていない、またはうまく読み取れなかった場合
+            total_base_price = 0
+            total_base_koma = 0
+
+        # 追加コマの計算（実際の受講数 - すべてのコースの合計契約コマ数）
+        actual_extra_count = max(0, actual_koma - total_base_koma)
+        
+        # 割引の計算
+        discount_amount = discount_koma * max_extra_unit_price
+        
+        # 最終的な計算額（基本料金の合算 ＋ 追加コマ代 ➖ 割引）
+        calculated_price = max(0, total_base_price + (actual_extra_count * max_extra_unit_price) - discount_amount)
 
         if force_recalc:
             price = calculated_price
@@ -177,7 +209,7 @@ def render_tuition_dashboard_page():
         })
     
     if missing_master_warnings:
-        st.error("⚠️ 以下の生徒の条件に完全一致する設定が「料金マスタ」に見つかりません。")
+        st.error("⚠️ 以下の生徒の契約条件に一致する設定が「料金マスタ」に見つかりません。料金が0円として計算されています。")
         for w in missing_master_warnings:
             st.write(f"- {w}")
 
