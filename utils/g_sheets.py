@@ -1180,7 +1180,6 @@ def delete_account(user_id):
         gc = get_gc_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
         
-        # ⚠️ ここはご自身のアカウント管理シートの名前に変更してください
         ws = sh.worksheet("設定_アカウント") 
         
         try:
@@ -1196,6 +1195,38 @@ def delete_account(user_id):
             
     except Exception as e:
         print(f"アカウント削除エラー: {e}")
+        return False
+
+def update_account_role(user_id, new_role):
+    """
+    指定したユーザーIDの権限（role）を更新する裏方関数
+    """
+    gc = get_gc_client()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("設定_アカウント")  # ※ご自身のシート名に合わせてください（例: "アカウント管理" など）
+        all_values = ws.get_all_values()
+        
+        if len(all_values) <= 1:
+            return False
+            
+        header = all_values[0]
+        
+        try:
+            id_idx = header.index("ユーザーID")
+            role_idx = header.index("権限")
+        except ValueError:
+            return False
+        
+        # 該当するユーザーIDを探して、権限のマスだけを上書き
+        for i in range(1, len(all_values)):
+            if str(all_values[i][id_idx]) == str(user_id):
+                ws.update_cell(i + 1, role_idx + 1, new_role)
+                return True
+                
+        return False # 見つからなかった場合
+    except Exception as e:
+        print(f"アカウント権限更新エラー: {e}")
         return False
 
 #tuition_dashboard.py
