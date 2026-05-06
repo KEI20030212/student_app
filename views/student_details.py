@@ -3,10 +3,10 @@ import pandas as pd
 import altair as alt 
 import datetime 
 import time 
-import gspread # 🌟 APIエラー対策
 
+# 🌟 変更: get_student_info を削除し、get_student_master に変更
 from utils.g_sheets import (
-    get_student_info,
+    get_student_master,
     update_student_info,
     save_test_score,
     load_test_scores,
@@ -24,7 +24,7 @@ from utils.calc_logic import (
 from utils.api_guard import robust_api_call
 
 def render_student_details_page(selected_student_option):
-    if " - " in selected_student_option:
+    if selected_student_option and " - " in selected_student_option:
         student_id = selected_student_option.split(" - ")[0]
         selected_student = selected_student_option.split(" - ")[1]
     else:
@@ -34,15 +34,21 @@ def render_student_details_page(selected_student_option):
     tab_info, tab_input, tab_view = st.tabs(["👤 基本情報・カルテ", "✍️ テスト成績を入力", "📈 テスト成績推移を見る"])
 
     with tab_info:
-        info = get_student_info(selected_student)
+        # 🌟 劇的改善: 重い個別取得をやめて、キャッシュされたマスターから一瞬で情報を探す！
+        df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+        info = {}
+        if not df_students.empty and '生徒名' in df_students.columns:
+            row = df_students[df_students['生徒名'] == selected_student]
+            if not row.empty:
+                info = row.iloc[0].to_dict()
         
         if student_id == "未設定" and "生徒ID" in info:
             student_id = str(info["生徒ID"]).strip()
-        # 🌟 APIエラー対策付きの読み込み (robust_api_callでスッキリ！)
+            
+        # 🌟 APIエラー対策付きの読み込み
         df_test = robust_api_call(load_test_scores, fallback_value=pd.DataFrame())
         
         df_student_tests = pd.DataFrame()
-        # エラーで空のDataFrameが返ってきていないか、エラーフラグがないか確認
         if not df_test.empty and 'APIエラー発生' not in df_test.columns:
             df_student_tests = df_test[df_test['生徒名'] == selected_student]
 
@@ -50,31 +56,35 @@ def render_student_details_page(selected_student_option):
         
         with col_prof:
             st.markdown(f"### 📝 {selected_student} さんのプロフィール")
-            st.markdown(f"**🎓 学年**: {info.get('学年', '未設定')}")
-            # 🌟 新規追加の表示項目
-            st.markdown(f"**🔥 受験区分**: {info.get('受験区分', '未設定')}")
-            st.markdown(f"**🏫 学校区分**: {info.get('学校区分', '未設定')}")
+            st.markdown(f"**🎓 学年**: {info.get('学年', '') or '未設定'}")
             
-            st.markdown(f"**🏫 学校名**: {info.get('学校名', '未設定')}")
-            st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '未設定')}")
-            st.markdown(f"**📚 受講科目**: {info.get('受講科目', '未設定')}")
+            # 🌟 表示時も空欄に対応
+            disp_exam = info.get('受験区分', '')
+            st.markdown(f"**🔥 受験区分**: {disp_exam if disp_exam else '（空欄）'}")
             
-            if st.session_state.get('role') == 'admin':
+            disp_school = info.get('学校区分', '')
+            st.markdown(f"**🏫 学校区分**: {disp_school if disp_school else '（空欄）'}")
+            
+            st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
+            st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
+            st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
+            
+            if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
                 with st.expander("✏️ 基本情報を編集する (教室長のみ)"):
-                    # 🌟 st.form を使って、ボタンを押すまで通信しないようにする
                     with st.form("edit_student_info_form"):
                         new_grade = st.text_input("学年 (例: 中2)", value=info.get('学年', ''))
                         
-                        # 🌟 新規追加：受験生・学校区分の入力欄を横並びで配置
+                        # 🌟 変更："未設定" を排除し、先頭を空欄("")にする
                         c_ex1, c_ex2 = st.columns(2)
                         
-                        exam_opts = ["未設定", "受験生"]
-                        current_exam = str(info.get('受験区分', '未設定'))
+                        exam_opts = ["", "受験生"]
+                        # 古いデータに"未設定"が残っていても空欄として扱う
+                        current_exam = str(info.get('受験区分', '')).replace('未設定', '')
                         ex_idx = exam_opts.index(current_exam) if current_exam in exam_opts else 0
                         new_exam = c_ex1.selectbox("🔥 受験区分", exam_opts, index=ex_idx)
 
-                        school_opts = ["未設定", "公立", "私立・国立"]
-                        current_sch_type = str(info.get('学校区分', '未設定'))
+                        school_opts = ["", "公立", "私立・国立"]
+                        current_sch_type = str(info.get('学校区分', '')).replace('未設定', '')
                         sch_idx = school_opts.index(current_sch_type) if current_sch_type in school_opts else 0
                         new_school_type = c_ex2.selectbox("🏫 学校区分", school_opts, index=sch_idx)
                         
@@ -84,9 +94,7 @@ def render_student_details_page(selected_student_option):
                         
                         if st.form_submit_button("💾 基本情報を保存", type="primary"):
                             with st.spinner("☁️ 情報を保存中...（混雑時は自動で再試行します）"):
-                                # 🌟 保存処理を関数にまとめて robust_api_call に渡す
                                 def _update_info():
-                                    # ⚠️ update_student_info に new_exam と new_school_type を渡すように追加！
                                     update_student_info(
                                         student_id,
                                         selected_student, 
@@ -99,8 +107,8 @@ def render_student_details_page(selected_student_option):
                                         info.get('内申点', 3), 
                                         info.get('最新偏差値', 50), 
                                         info.get('宿題履行率', 100),
-                                        new_exam,        # 🌟 追加
-                                        new_school_type  # 🌟 追加
+                                        new_exam,        
+                                        new_school_type  
                                     )
                                     return True
                                 
@@ -143,19 +151,21 @@ def render_student_details_page(selected_student_option):
             except ValueError: 
                 current_hw_rate = 0.0
                 
-            quiz_master = get_quiz_master_dict()
-            quiz_records = get_student_quiz_records(selected_student)
+            # 🌟 追撃のAPIエラー対策！ここにもガードを配置！
+            quiz_master = robust_api_call(get_quiz_master_dict, fallback_value={})
+            quiz_records = robust_api_call(lambda: get_student_quiz_records(selected_student), fallback_value=[])
             total_quiz_pts = 0
             
             for record in quiz_records:
                 pts = calculate_quiz_points(
-                    score=record["score"], 
-                    quiz_name=record["quiz_name"], 
+                    score=record.get("score", 0), 
+                    quiz_name=record.get("quiz_name", ""), 
                     quiz_master_dict=quiz_master
                 )
                 total_quiz_pts += pts
             
-            self_study_pts = get_student_self_study_points(selected_student)
+            # 🌟 自習ポイントの取得もガード！
+            self_study_pts = robust_api_call(lambda: get_student_self_study_points(selected_student), fallback_value=0)
             current_motivation = calculate_motivation_rank(current_hw_rate, total_quiz_pts, self_study_pts)
             
             st.caption(f"🔥 獲得ポイント ｜ 小テスト: **{total_quiz_pts} pt** / 自習: **{self_study_pts} pt**")
@@ -187,7 +197,6 @@ def render_student_details_page(selected_student_option):
                     st.info("各科目の内申点（1〜5）と態度（A〜C）を入力してください。")
                     n1, n2, n3, n4, n5 = st.columns(5)
                     
-                    # 🌟 各科目に「態度」の入力欄を追加
                     n_eng = n1.number_input("英語 内申", 1, 5, value=None)
                     att_eng = n1.selectbox("英語 態度", ["", "A", "B", "C"], index=0)
                     
@@ -223,7 +232,6 @@ def render_student_details_page(selected_student_option):
                     if submit_naishin:
                         with st.spinner("☁️ 保存中...（混雑時は自動で再試行します）"):
                             def _save_naishin():
-                                # 🌟 save_test_score に態度の情報を渡す（※utils/g_sheets.py側も引数を受け取るように改修が必要です）
                                 save_test_score(date, selected_student, test_type, n_eng, n_math, n_jpn, n_sci, n_soc, 
                                                 None, None, None, None, None, None, None, 
                                                 n_pe, n_gika, None, n_mus, n_art, is_naishin=True,
@@ -311,21 +319,18 @@ def render_student_details_page(selected_student_option):
 
     with tab_view:
         if not df_student_tests.empty:
-            # データの準備: 日時でソート
             df_view = df_student_tests.copy()
             df_view['日時'] = pd.to_datetime(df_view['日時'])
             df_view = df_view.sort_values('日時')
 
             st.subheader("📊 成績・内申・態度 推移チャート")
 
-            # 表示モードの切り替え
             view_mode = st.radio("表示項目を選択してください", ["総合点・偏差値", "内申点・学習態度"], horizontal=True)
 
             if view_mode == "総合点・偏差値":
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("**📈 総合点 推移**")
-                    # 総合点が存在するデータのみ抽出
                     df_total = df_view[df_view['総合'] != "-"]
                     if not df_total.empty:
                         st.line_chart(df_total.set_index("日時")["総合"])
@@ -340,14 +345,12 @@ def render_student_details_page(selected_student_option):
                     else:
                         st.caption("偏差値のデータがありません。")
 
-            else:  # 内申点・学習態度
-                # 内申点データのみ抽出
+            else:  
                 df_naishin_only = df_view[df_view['テスト種別'] == "通知表（内申点）"].copy()
                 
                 if df_naishin_only.empty:
                     st.info("内申点・態度のデータがまだ登録されていません。")
                 else:
-                    # 科目選択
                     subjects = ["英語", "数学", "国語", "理科", "社会", "保体", "技家", "美術", "音楽"]
                     selected_subs = st.multiselect("表示する科目を選択", subjects, default=["英語", "数学", "国語"])
 
@@ -355,7 +358,6 @@ def render_student_details_page(selected_student_option):
 
                     with col_n:
                         st.markdown("**🏫 内申点(1-5) 推移**")
-                        # グラフ用データ整形
                         plot_data_n = pd.DataFrame({"日時": df_naishin_only["日時"]})
                         for sub in selected_subs:
                             col_name = f"{sub} 内申"
@@ -368,17 +370,14 @@ def render_student_details_page(selected_student_option):
                         st.markdown("**🔥 学習態度(A-C) 推移**")
                         st.caption("※ A=3, B=2, C=1 として計算")
                         
-                        # グラフ用データ整形（態度を数値に変換）
                         att_map = {"A": 3, "B": 2, "C": 1}
                         plot_data_a = pd.DataFrame({"日時": df_naishin_only["日時"]})
                         
                         for sub in selected_subs:
                             col_name = f"{sub} 態度"
                             if col_name in df_naishin_only.columns:
-                                # 態度を数値に変換してプロット
                                 plot_data_a[sub] = df_naishin_only[col_name].map(att_map)
                         
-                        # Altairを使用してY軸をA,B,Cで表示する工夫
                         chart_a = alt.Chart(plot_data_a.melt("日時", var_name="科目", value_name="値")).mark_line(point=True).encode(
                             x='日時:T',
                             y=alt.Y('値:Q', scale=alt.Scale(domain=[1, 3]), axis=alt.Axis(values=[1, 2, 3], labelExpr="datum.value == 3 ? 'A' : datum.value == 2 ? 'B' : 'C'")),
@@ -390,13 +389,11 @@ def render_student_details_page(selected_student_option):
             st.divider()
             st.subheader("📋 成績履歴詳細")
             
-            # データフレームの見た目を整える
             def color_attitude(val):
-                if val == 'A': return 'background-color: #d1e7dd' # 緑
-                if val == 'C': return 'background-color: #f8d7da' # 赤
+                if val == 'A': return 'background-color: #d1e7dd'
+                if val == 'C': return 'background-color: #f8d7da'
                 return ''
 
-            # 数値以外の "-" などを適切に処理して表示
             st.dataframe(
                 df_view.sort_values("日時", ascending=False),
                 hide_index=True,
