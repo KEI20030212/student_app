@@ -157,13 +157,24 @@ def render_tuition_dashboard_page():
                 c_name = c["name"]
                 c_koma = c["koma"]
                 
-                mask = (price_master['学年'] == grade) & (price_master['コマ数'] == c_koma)
+                # 🌟 1. まずは「必須条件（学年・コマ数・コース・学校区分）」だけで絞り込む
+                base_mask = (price_master['学年'] == grade) & (price_master['コマ数'] == c_koma)
                 if 'コース' in price_master.columns and c_name != "未設定":
-                    mask &= (price_master['コース'] == c_name)
-                if '受験区分' in price_master.columns: mask &= (price_master['受験区分'] == exam_status)
-                if '学校区分' in price_master.columns: mask &= (price_master['学校区分'] == school_type)
+                    base_mask &= (price_master['コース'] == c_name)
+                if '学校区分' in price_master.columns: 
+                    # 学校区分は完全一致、またはマスタ側が空欄ならOKとする柔軟設定
+                    base_mask &= ((price_master['学校区分'] == school_type) | (price_master['学校区分'] == ""))
                 
-                match_df = price_master[mask]
+                # 🌟 2. 必須条件をクリアしたグループの中で「受験区分」も完全一致するかチェック
+                perfect_mask = base_mask.copy()
+                if '受験区分' in price_master.columns:
+                    perfect_mask &= (price_master['受験区分'] == exam_status)
+                
+                match_df = price_master[perfect_mask]
+                
+                # 🌟 3. もし完全一致がなければ、必須条件のみクリアした（受験区分違いの）データを採用！
+                if match_df.empty:
+                    match_df = price_master[base_mask]
                 
                 if not match_df.empty:
                     total_base_price += int(match_df.iloc[0]['料金'])
