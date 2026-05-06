@@ -44,7 +44,7 @@ DRAFT_PREFIXES = (
     "ss_", "d_", "s_", "e_", "b_", "m_"
 )
 
-def render_multi_input_page(textbook_master):
+def render_multi_input_page():
     # ==========================================
     # 🌟 新機能: 画面を追従するサイドバー一時保存メニュー
     # ==========================================
