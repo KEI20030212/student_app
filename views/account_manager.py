@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import time
 from utils.g_sheets import get_all_accounts, add_new_account, delete_account, update_account_role
 
 # 🌟 追加: アカウント管理画面もAPIガードで鉄壁に守る！
@@ -17,7 +18,7 @@ def render_account_manager_page():
     st.header("⚙️ アカウント・システム設定")
     
     with st.spinner("アカウント情報を取得中..."):
-        accounts_dict = robust_api_call(get_all_accounts, fallback_value={})
+        accounts_dict = robust_api_call(get_all_accounts, force_refresh=True, fallback_value={})
     
     role_mapping = {
         "owner": "👑 オーナー",
@@ -81,8 +82,9 @@ def render_account_manager_page():
                     success = robust_api_call(add_new_account, new_id, new_pass, new_name, new_role, fallback_value=False)
                 
                 if success:
-                    get_all_accounts.clear()
-                    # 成功メッセージを表示（toastは画面右下にフワッと出ます）
+                    if 'all_accounts' in st.session_state:
+                        del st.session_state['all_accounts']
+                    time.sleep(1.5)
                     st.session_state['toast_msg'] = f"✅ {new_name} 先生のアカウントを作成しました！"
                     st.rerun()
                 else:
@@ -116,7 +118,12 @@ def render_account_manager_page():
                     success = robust_api_call(update_account_role, target_id, update_role, fallback_value=False)
                 
                 if success:
-                    get_all_accounts.clear()
+                    # 🌟 1. 記憶を正しく消去する
+                    if 'all_accounts' in st.session_state:
+                        del st.session_state['all_accounts']
+                        
+                    time.sleep(1.5)
+                    
                     st.session_state['toast_msg'] = f"🔄 アカウント「{target_id}」の権限を【 {role_mapping[update_role]} 】に変更しました。"
                     st.rerun()
                 else:
@@ -156,7 +163,9 @@ def render_account_manager_page():
                             success = robust_api_call(delete_account, target_id, fallback_value=False)
                         
                         if success:
-                            get_all_accounts.clear()
+                            if 'all_accounts' in st.session_state:
+                                del st.session_state['all_accounts']
+                            time.sleep(1.5)
                             st.session_state['toast_msg'] = f"🗑️ アカウント「{target_id}」を削除しました。"
                             st.rerun()
                         else:
