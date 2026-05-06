@@ -4,20 +4,20 @@ from PIL import Image
 # 📦 1. 画面部隊（views）のインポート
 # ==========================================
 from views.home import render_home_page
-from views.attendance_seat import render_attendance_seat_page
+from views.attendance_seat import render_attendance_seat_page#改良済
 from views.multi_input import render_multi_input_page#改良済
 from views.student_portal import render_student_portal_page#改良済
 from views.student_details import render_student_details_page#改良済
 from views.analysis import render_analysis_page#改良済
-from views.dashboard_combined import render_combined_dashboard_page
-from views.search_page import render_search_page
-from views.analytics_dashboard import render_analytics_dashboard_page
-from views.my_salary import render_my_salary_page
-from views.account_manager import render_account_manager_page
-from views.message_sender import render_message_sender_page
-from views.quiz_management import render_quiz_management_page
-from views.line_report import render_line_report_page
-from views.school_homework import render_school_homework_page
+from views.dashboard_combined import render_combined_dashboard_page#改良済
+from views.quiz_management import render_quiz_management_page#改良済
+from views.school_homework import render_school_homework_page#改良済
+from views.message_sender import render_message_sender_page#変更なし
+from views.line_report import render_line_report_page#改良済
+from views.search_page import render_search_page#改良済
+from views.analytics_dashboard import render_analytics_dashboard_page#改良済
+from views.my_salary import render_my_salary_page#変更なし
+from views.account_manager import render_account_manager_page#変更なし
 from views.finance_integrated import render_finance_integrated_page
 #from views.quiz_maker import render_quiz_maker_page
 #from views.dashboard import render_dashboard_page
@@ -31,7 +31,7 @@ from views.finance_integrated import render_finance_integrated_page
 # 🛠️ 2. 裏方部隊（utils）のインポート
 # ==========================================
 from utils.calc_logic import calculate_hw_rate, calculate_quiz_points, calculate_motivation_rank
-from utils.g_sheets import load_textbook_master, get_textbook_master, add_new_textbook, get_last_homework_info
+from utils.g_sheets import get_textbook_master, add_new_textbook, get_last_homework_info
 from utils.g_sheets import get_all_accounts
 
 
@@ -133,7 +133,7 @@ def main():
     else:
         # 👨‍🏫 一般講師専用（自分に関することだけ）
         menu_options.extend([
-            "💴 自分の給与確認"             # ← my_salary.py を表示
+            "💴 自分の給与確認"
         ])
         
     page = st.sidebar.radio("移動先", menu_options)
@@ -144,15 +144,12 @@ def main():
         st.session_state.clear()
         st.rerun()
 
-    # 必要なマスターデータをロード
-    textbook_master = load_textbook_master()
-
     # ==========================================
     # 🎯 選ばれたメニューに応じて、該当する画面関数を呼び出すだけ！
     # ==========================================
     if page == "📢 ホーム・連絡・出席掲示板": render_home_page()
     #elif page == "✅ 本日の出欠・座席表": render_attendance_seat_page()　　#home.pyに統合
-    elif page == "📝 授業・自習記録の入力 (出欠対応)": render_multi_input_page(textbook_master)
+    elif page == "📝 授業・自習記録の入力 (出欠対応)": render_multi_input_page()
     #elif page == "🖨️ 小テスト作成・印刷": render_quiz_maker_page()
     elif page == "👤 生徒個別ポータル": render_student_portal_page()
     elif page == "💯 小テスト管理センター": render_quiz_management_page()
