@@ -1204,7 +1204,7 @@ def update_account_role(user_id, new_role):
     gc = get_gc_client()
     try:
         sh = gc.open_by_key(SPREADSHEET_ID)
-        ws = sh.worksheet("設定_アカウント")  # ※ご自身のシート名に合わせてください（例: "アカウント管理" など）
+        ws = sh.worksheet("設定_アカウント")  
         all_values = ws.get_all_values()
         
         if len(all_values) <= 1:
@@ -1213,9 +1213,11 @@ def update_account_role(user_id, new_role):
         header = all_values[0]
         
         try:
-            id_idx = header.index("ユーザーID")
+            # 🌟 ここを "ユーザーID" から "ID" に修正しました！
+            id_idx = header.index("ID") 
             role_idx = header.index("権限")
         except ValueError:
+            print("列名が見つかりません。「ID」または「権限」の列が存在するか確認してください。")
             return False
         
         # 該当するユーザーIDを探して、権限のマスだけを上書き
