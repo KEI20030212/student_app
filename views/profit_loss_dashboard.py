@@ -3,12 +3,11 @@ import pandas as pd
 import datetime 
 import time  
 
-# 🌟 変更: 統合ログを取得する関数を追加インポート
 from utils.api_guard import robust_api_call
-from utils.g_sheets import load_billing_data, load_fixed_costs, get_all_logs
+# 🌟 変更: load_salary_data を新しくインポートに追加！
+from utils.g_sheets import load_billing_data, load_fixed_costs, get_all_logs, load_salary_data
 
 # --- 🚀 データ取得を高速化＆保護するキャッシュ関数 ---
-# 🌟 追加: 統合シートから一括で取得する爆速関数（月のリスト生成用）
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
@@ -23,10 +22,17 @@ def fetch_fixed_costs_cached():
     """固定費データを取得・キャッシュ・防御"""
     return robust_api_call(load_fixed_costs, fallback_value=pd.DataFrame())
 
+# 🌟 追加: 給与データを取得する爆速キャッシュ関数
+@st.cache_data(ttl=600, show_spinner="☁️ 給与データを取得中...")
+def fetch_salary_data_cached(month):
+    """給与データを取得・キャッシュ・防御"""
+    return robust_api_call(load_salary_data, month, fallback_value=pd.DataFrame())
+
+
 def render_profit_loss_dashboard_page():
     st.header("📈 経営ダッシュボード (純利益管理)")
     
-    # --- 🌟 変更: 「授業ログ統合」から動的に年月リストを生成する！ ---
+    # --- 動的に年月リストを生成する ---
     month_options = ["データなし"]
     df_all_logs = cached_get_all_logs()
     
@@ -37,7 +43,6 @@ def render_profit_loss_dashboard_page():
             valid_dates['年月'] = valid_dates['日時'].dt.strftime("%Y年%m月")
             month_options = sorted(valid_dates['年月'].unique().tolist(), reverse=True)
     
-    # もし授業ログが空っぽだった場合の予備ルート（過去12ヶ月を作る）
     if month_options == ["データなし"]:
         today = datetime.datetime.now()
         month_options = []
@@ -49,7 +54,7 @@ def render_profit_loss_dashboard_page():
                 y -= 1
             month_options.append(f"{y}年{m:02d}月")
         
-    # 🌟 操作パネル（月選択 ＆ 更新ボタン）を画面上部に横並びで配置
+    # 🌟 操作パネル
     col_month, col_btn = st.columns([2, 1], vertical_alignment="bottom")
     
     with col_month:
@@ -59,7 +64,7 @@ def render_profit_loss_dashboard_page():
         if st.button("🔄 最新データに更新", type="primary", use_container_width=True):
             with st.spinner("🔄 サーバーから最新データを取得中..."):
                 time.sleep(0.6)  
-                st.cache_data.clear() # 🌟 アプリ全体のキャッシュをクリアしてリフレッシュ
+                st.cache_data.clear()
             st.rerun()
 
     st.divider()
@@ -72,7 +77,7 @@ def render_profit_loss_dashboard_page():
     # 📊 データ取得とエラーハンドリング
     # ==========================================
     
-    # 1. 売上の取得 (🌟 キャッシュ＆防御経由)
+    # 1. 売上の取得
     billing_df = fetch_billing_data_cached(month)
     
     total_revenue = 0
@@ -81,11 +86,16 @@ def render_profit_loss_dashboard_page():
     elif "💴 今月の請求額 (円)" in billing_df.columns:
         total_revenue = int(pd.to_numeric(billing_df["💴 今月の請求額 (円)"], errors='coerce').fillna(0).sum())
 
-    # 2. 支出（給与）の取得
-    # 💡 TODO: salary_dashboardから保存された給与データを読み込むAPIが完成したら置き換え
-    total_salary = 450000 # 仮のデータ
+    # 2. 支出（給与）の取得 🌟 (給与ダッシュボードから全自動連携！)
+    salary_df = fetch_salary_data_cached(month)
+    
+    total_salary = 0
+    if salary_df.empty:
+        st.info(f"💡 {month} の給与データがまだ「公開」されていません。給与ダッシュボードで公開ボタンを押すとここに反映されます。")
+    elif "💰 最終支給額 (円)" in salary_df.columns:
+        total_salary = int(pd.to_numeric(salary_df["💰 最終支給額 (円)"], errors='coerce').fillna(0).sum())
 
-    # 3. 支出（固定費）の取得 (🌟 キャッシュ＆防御経由)
+    # 3. 支出（固定費）の取得
     fixed_df = fetch_fixed_costs_cached()
     
     total_fixed = 0
@@ -134,26 +144,32 @@ def render_profit_loss_dashboard_page():
         ]
         st.dataframe(pd.DataFrame(pnl_data), hide_index=True, use_container_width=True)
 
-    # 🌟 下部：各データの内訳をドリルダウン
+    # 🌟 下部：各データの内訳をドリルダウン (3列に拡張！)
     st.divider()
     st.subheader("🔍 経費・売上の詳細内訳")
     
-    col_detail1, col_detail2 = st.columns(2)
+    col_detail1, col_detail2, col_detail3 = st.columns(3)
     
     with col_detail1:
         st.markdown("**💸 固定費一覧**")
         if not fixed_df.empty:
             st.dataframe(fixed_df, hide_index=True, use_container_width=True)
         else:
-            st.info("表示できる固定費データがありません。")
+            st.info("データなし")
             
     with col_detail2:
+        st.markdown("**👨‍🏫 講師給与一覧**")
+        if not salary_df.empty:
+            # 見やすいように講師名と支給額だけをピックアップして表示
+            display_cols = [col for col in ["👨‍🏫 担当講師", "💰 最終支給額 (円)"] if col in salary_df.columns]
+            st.dataframe(salary_df[display_cols] if display_cols else salary_df, hide_index=True, use_container_width=True)
+        else:
+            st.info("データなし")
+
+    with col_detail3:
         st.markdown("**💴 売上（生徒別 月謝）一覧**")
         if not billing_df.empty:
             display_cols = [col for col in ["👤 生徒名", "生徒名", "💴 今月の請求額 (円)"] if col in billing_df.columns]
-            if display_cols:
-                st.dataframe(billing_df[display_cols], hide_index=True, use_container_width=True)
-            else:
-                st.dataframe(billing_df, hide_index=True, use_container_width=True) 
+            st.dataframe(billing_df[display_cols] if display_cols else billing_df, hide_index=True, use_container_width=True) 
         else:
-            st.info("表示できる売上データがありません。")
+            st.info("データなし")
