@@ -92,7 +92,11 @@ def render_tuition_dashboard_page():
     df_month = df_all_logs[df_all_logs['年月'] == selected_month] if not df_all_logs.empty else pd.DataFrame(columns=['生徒名'])
 
     st.subheader(f"👤 {selected_month} の請求設定")
-    force_recalc = st.checkbox("🔄 過去の保存データを無視して、現在の料金マスタで強制的に再計算する")
+    
+    # 🌟 管理費の入力欄と、再計算チェックボックスを横並びで配置
+    c_fee1, c_fee2 = st.columns(2)
+    global_admin_fee = c_fee1.number_input("🏢 今月の管理費・諸経費（一律加算）", min_value=0, value=3300, step=100)
+    force_recalc = c_fee2.checkbox("🔄 過去の保存データを無視して、強制的に再計算する")
 
     actual_koma_dict = df_month['生徒名'].value_counts().to_dict()
     saved_billing_df = robust_api_call(load_billing_data, selected_month, fallback_value=pd.DataFrame())
@@ -127,8 +131,12 @@ def render_tuition_dashboard_page():
             try:
                 saved_extra_count = int(next((row[c] for c in saved_billing_df.columns if "追加コマ" in c), 0))
                 discount_koma = int(next((row[c] for c in saved_billing_df.columns if "割引コマ" in c), discount_koma))
+                # 🌟 保存データの中に管理費があればそれを優先、なければさっき入力した一律の額
+                saved_admin_fee = int(next((row[c] for c in saved_billing_df.columns if "管理費" in c), global_admin_fee))
             except:
-                pass
+                saved_admin_fee = global_admin_fee
+        else:
+            saved_admin_fee = global_admin_fee
 
         # 🤖 【新機能】複数コースを自動パースして計算する超賢いロジック
         course_list = []
@@ -198,15 +206,21 @@ def render_tuition_dashboard_page():
         # 割引の計算
         discount_amount = discount_koma * max_extra_unit_price
         
-        # 最終的な計算額（基本料金の合算 ＋ 追加コマ代 ➖ 割引）
-        calculated_price = max(0, total_base_price + (actual_extra_count * max_extra_unit_price) - discount_amount)
+        # 最終的な授業料（基本料金の合算 ＋ 追加コマ代 ➖ 割引）
+        tuition_price = max(0, total_base_price + (actual_extra_count * max_extra_unit_price) - discount_amount)
+        
+        # 🌟 授業料 ＋ 管理費 ＝ 最終的な請求額！
+        calculated_price = tuition_price + saved_admin_fee
 
         if force_recalc:
             price = calculated_price
+            final_admin_fee = global_admin_fee
         elif saved_price is not None and actual_extra_count == saved_extra_count:
             price = saved_price
+            final_admin_fee = saved_admin_fee
         else:
             price = calculated_price 
+            final_admin_fee = saved_admin_fee
 
         table_data.append({
             "👤 生徒名": student,
@@ -216,6 +230,7 @@ def render_tuition_dashboard_page():
             "📝 実際の受講数": actual_koma,
             "➕ 追加コマ": actual_extra_count,
             "🉐 割引コマ": discount_koma, 
+            "🏢 管理費": final_admin_fee,  # 🌟 管理費の列を追加！
             "💴 今月の請求額 (円)": int(price)
         })
     
