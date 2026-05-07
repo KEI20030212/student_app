@@ -1399,6 +1399,42 @@ def publish_salary_data(year_month, df_summary):
         print(f"給与公開エラー詳細: {e}")
         return False
 
+def load_salary_data(month):
+    """
+    「公開給与」シートから指定された年月の給与データだけを取得する関数
+    """
+    try:
+        import pandas as pd
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        
+        # 1. シートの存在確認
+        try:
+            worksheet = sh.worksheet("公開給与")
+        except gspread.exceptions.WorksheetNotFound:
+            # まだ一度も給与ダッシュボードで「公開」ボタンが押されていない（シートが無い）場合は空っぽで返す
+            return pd.DataFrame()
+            
+        # 2. データの取得
+        all_data = worksheet.get_all_records()
+        if not all_data:
+            return pd.DataFrame()
+            
+        df_all = pd.DataFrame(all_data)
+        
+        # 3. 指定された「年月」のデータだけを絞り込んで返す
+        if '年月' in df_all.columns:
+            df_filtered = df_all[df_all['年月'] == month].copy()
+            return df_filtered
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        print(f"給与データ読み込みエラー: {e}")
+        import pandas as pd
+        return pd.DataFrame()
+
 #profit_loss_dashboard.py
 def load_fixed_costs():
     """固定費（家賃など）を読み込む"""
