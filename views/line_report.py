@@ -176,7 +176,8 @@ def render_line_report_page():
 {msgs_text}
 
 ご不明な点がございましたら、お気軽にご連絡ください。
-引き続きよろしくお願いいたします。"""
+引き続きよろしくお願いいたします。
+槌屋"""
 
             # 🌟 生徒ごとにアコーディオン（折りたたみ）形式で表示！
             with st.expander(f"📱 {student_name} さんのレポート", expanded=False):
