@@ -287,7 +287,7 @@ def render_multi_input_page():
                                 st.write("🧠 **授業中の様子・評価**")
                                 col_eval1, col_eval2 = st.columns(2)
                                 with col_eval1:
-                                    concentration = st.selectbox("集中力", ["超集中", "疲労気味", "ムラあり", "集中できない"], index=None, placeholder="選択してください", key=f"conc_{i}")
+                                    concentration = st.selectbox("集中力", ["超集中", "前向き", "疲労気味", "ムラあり", "集中できない"], index=None, placeholder="選択してください", key=f"conc_{i}")
                                 with col_eval2:
                                     reaction = st.selectbox("ミスへの反応", ["原因を分析した", "悔しがった", "放置しようとした"], index=None, placeholder="選択してください", key=f"reac_{i}")
                                 
