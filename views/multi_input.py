@@ -394,7 +394,6 @@ def render_multi_input_page():
         st.divider()
         if len(input_data_list) == num_students:
 
-            # 🌟 新機能: 実際の出席人数をカウントして、授業形態(1:◯)を自動補正！
             actual_attendees = sum(1 for data in input_data_list if "欠席" not in data["attendance"])
             actual_class_type = f"1:{actual_attendees}" if actual_attendees > 0 else class_type
             
@@ -404,6 +403,10 @@ def render_multi_input_page():
             if st.button("🚀 全員の記録をまとめて保存する", type="primary", use_container_width=True):
                 with st.status("データを保存中...", expanded=True) as status:
                     for data in input_data_list:
+                        # 🌟 新機能: 欠席の生徒は保存処理を完全にスキップする！
+                        if "欠席" in data.get("attendance", ""):
+                            continue
+
                         # 1. 授業記録を保存
                         robust_api_call(
                             save_to_spreadsheet,
@@ -415,7 +418,7 @@ def render_multi_input_page():
                             quiz_records=[],
                             date=date, 
                             teacher_name=teacher_name,
-                            class_type=actual_class_type,  # 🌟 ここで補正された授業形態（1:2など）を保存！
+                            class_type=actual_class_type,  
                             attendance=data.get("attendance", ""),
                             class_slot=class_slot,
                             advice=data.get("advice", ""),
@@ -445,6 +448,7 @@ def render_multi_input_page():
                                     mode="授業内"
                                 )
                         
+                        # 宿題実施率の更新（欠席でなければ実行。上でcontinueしているので念のためのガード）
                         if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"]:
                             try:
                                 robust_api_call(
@@ -456,7 +460,7 @@ def render_multi_input_page():
                     
                     status.update(label="保存完了！", state="complete", expanded=False)
 
-                st.success(f"✅ {num_students}名全員の記録を保存しました！")
+                st.success(f"✅ {actual_attendees}名（出席者のみ）の記録を保存しました！")
                 
                 if "draft_data" in st.session_state:
                     del st.session_state["draft_data"]
