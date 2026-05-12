@@ -2,6 +2,8 @@ import streamlit as st
 import datetime
 import time
 import re
+import os
+import pickle
 import pandas as pd
 
 from utils.g_sheets import (
@@ -51,12 +53,16 @@ DRAFT_PREFIXES = (
 )
 
 def render_multi_input_page():
+    # 🌟 ログイン中の先生のIDを取得（IDごとに保存ファイルを分けて、他の先生と混ざるのを防ぐ！）
+    user_id = st.session_state.get('user_id', st.session_state.get('username', 'default_user'))
+    draft_file = f"draft_{user_id}.pkl"
+
     # ==========================================
-    # 🌟 画面を追従するサイドバー一時保存メニュー
+    # 🌟 画面を追従するサイドバー一時保存メニュー（物理ファイル版）
     # ==========================================
     with st.sidebar:
-        st.header("💾 一時保存メニュー")
-        st.caption("ページ移動前に保存すると入力内容が消えません！")
+        st.header("💾 鉄壁の一時保存メニュー")
+        st.caption("アプリが落ちても、ブラウザを閉じても復元できます！")
         
         c1, c2 = st.columns(2)
         if c1.button("💾 保存", use_container_width=True):
@@ -64,12 +70,20 @@ def render_multi_input_page():
             for k, v in st.session_state.items():
                 if k.startswith(DRAFT_PREFIXES):
                     draft[k] = v
-            st.session_state["draft_data"] = draft
-            st.success("一時保存しました！")
+                    
+            # 🌟 変更: 物理ファイル（Pickle）としてPC/サーバーの奥底に直接書き込む！
+            with open(draft_file, "wb") as f:
+                pickle.dump(draft, f)
+                
+            st.success("鉄壁保存しました！")
             
         if c2.button("📂 復元", use_container_width=True):
-            if "draft_data" in st.session_state and st.session_state["draft_data"]:
-                for k, v in st.session_state["draft_data"].items():
+            # 🌟 変更: 物理ファイルが存在するかチェックして読み込む
+            if os.path.exists(draft_file):
+                with open(draft_file, "rb") as f:
+                    draft = pickle.load(f)
+                    
+                for k, v in draft.items():
                     st.session_state[k] = v
                 st.success("復元しました！")
                 time.sleep(1)
@@ -78,15 +92,15 @@ def render_multi_input_page():
                 st.warning("保存データがありません")
                 
         if st.button("🗑️ 保存データを削除", use_container_width=True):
-            if "draft_data" in st.session_state:
-                del st.session_state["draft_data"]
+            # 🌟 変更: 物理ファイルそのものを消去する
+            if os.path.exists(draft_file):
+                os.remove(draft_file)
                 st.success("削除しました！")
                 time.sleep(1)
                 st.rerun()
+            else:
+                st.info("削除するデータがありません")
         st.divider()
-    
-    st.header("📖 授業記録の入力")
-    st.divider()
 
     # 🌟 マスターデータの一括取得
     student_df = cached_get_student_master()
