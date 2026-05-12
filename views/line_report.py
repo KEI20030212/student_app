@@ -101,8 +101,8 @@ def render_line_report_page():
                     progress = "（未入力）"
                 
                 concentration = row.get("集中力", "")
-                reaction = row.get("反応", "")
-                attitude = f"集中力: {concentration} / 反応: {reaction}" if concentration or reaction else "（未入力）"
+                reaction = row.get("ミスへの反応", "")
+                attitude = f"集中力: {concentration} / ミスへの反応: {reaction}" if concentration or reaction else "（未入力）"
                 
                 advice = str(row.get("アドバイス", "")).strip()
                 parent_msg = str(row.get("保護者への連絡", "")).strip()
