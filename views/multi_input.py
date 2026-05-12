@@ -71,14 +71,14 @@ def render_multi_input_page():
                 if k.startswith(DRAFT_PREFIXES):
                     draft[k] = v
                     
-            # 🌟 変更: 物理ファイル（Pickle）としてPC/サーバーの奥底に直接書き込む！
+            # 物理ファイル（Pickle）としてPC/サーバーの奥底に直接書き込む！
             with open(draft_file, "wb") as f:
                 pickle.dump(draft, f)
                 
             st.success("鉄壁保存しました！")
             
         if c2.button("📂 復元", use_container_width=True):
-            # 🌟 変更: 物理ファイルが存在するかチェックして読み込む
+            # 物理ファイルが存在するかチェックして読み込む
             if os.path.exists(draft_file):
                 with open(draft_file, "rb") as f:
                     draft = pickle.load(f)
@@ -92,7 +92,7 @@ def render_multi_input_page():
                 st.warning("保存データがありません")
                 
         if st.button("🗑️ 保存データを削除", use_container_width=True):
-            # 🌟 変更: 物理ファイルそのものを消去する
+            # 物理ファイルそのものを消去する
             if os.path.exists(draft_file):
                 os.remove(draft_file)
                 st.success("削除しました！")
@@ -207,15 +207,13 @@ def render_multi_input_page():
                                     f"💬 **引継ぎメモ:**\n{last_note}"
                                 )
                                 
-                                # 🤖 【賢く進化】複数テキスト・複数範囲を全自動パース
+                                # 🤖 複数テキスト・複数範囲を全自動パース
                                 assigned_p = 0
                                 assigned_hw_list = []
                                 if str(last_hw_pages).strip() and str(last_hw_pages).strip() != "-":
                                     for line in str(last_hw_pages).split('\n'):
-                                        # 正規表現で「テキスト名: P.10〜20」または「P.10〜20」を抽出
                                         match = re.search(r'(?:(.*?)[:：]\s*)?[P\.]*(\d+)\s*[〜~-]\s*(\d+)', line)
                                         if match:
-                                            # テキスト名がない場合（古いデータ）は、last_hw_textを採用
                                             t_name = match.group(1) or str(last_hw_text).split('、')[0]
                                             a_start, a_end = int(match.group(2)), int(match.group(3))
                                             if a_end >= a_start:
@@ -229,10 +227,9 @@ def render_multi_input_page():
                                 
                                 if is_continuous:
                                     st.info("💡 連続コマモード：今回の宿題確認は行わず、前回の宿題をそのまま「次回の宿題指示」に引き継ぎます。")
-                                    assigned_p = 0 # 宿題履行率に影響させない
+                                    assigned_p = 0 
                                 else:
                                     if not assigned_hw_list:
-                                        # 過去データが特殊な形式で読み取れなかった場合の安全な予備ルート
                                         st.caption("※宿題指示が特殊形式のため個別表示できません。やったページ数を入力してください。")
                                         c_hw1, c_hw2 = st.columns(2)
                                         with c_hw1:
@@ -242,7 +239,6 @@ def render_multi_input_page():
                                         if done_end >= done_start and done_end > 0:
                                             completed_p = done_end - done_start + 1
                                     else:
-                                        # 🌟 解析した宿題の「数だけ」入力欄を動的に生成！
                                         for h_idx, hw in enumerate(assigned_hw_list):
                                             st.caption(f"📘 {hw['text']} (指示: P.{hw['start']}〜{hw['end']})")
                                             c_hw1, c_hw2 = st.columns(2)
@@ -342,7 +338,6 @@ def render_multi_input_page():
                                     next_hw_pages_str = str(last_hw_pages)
                                     st.info(f"🔄 【自動引き継ぎ内容】\n\n📚 テキスト: **{selected_hw_text_str}**\n🎯 範囲: \n{next_hw_pages_str}")
                                 else:
-                                    # 🌟 新機能: 宿題も複数テキスト対応（マルチセレクト）
                                     hw_text_options = ["🆕 新規テキスト入力"] + text_options
                                     selected_hw_texts = st.multiselect("次回の宿題テキスト (複数可)", hw_text_options, key=f"hw_texts_{i}")
 
@@ -360,7 +355,6 @@ def render_multi_input_page():
                                         for t_idx, hw_text in enumerate(selected_hw_texts):
                                             st.write(f"📘 **{hw_text}** の宿題")
                                             
-                                            # 🌟 新機能: 1つのテキストの中でページをまたぐ場合のために、範囲の「数」を選べるようにする
                                             num_ranges = st.number_input(f"【{hw_text}】から出す範囲の数 (飛び石対応)", min_value=1, max_value=5, value=1, key=f"hw_ranges_num_{i}_{t_idx}")
                                             
                                             for r_idx in range(num_ranges):
@@ -400,6 +394,13 @@ def render_multi_input_page():
         st.divider()
         if len(input_data_list) == num_students:
 
+            # 🌟 新機能: 実際の出席人数をカウントして、授業形態(1:◯)を自動補正！
+            actual_attendees = sum(1 for data in input_data_list if "欠席" not in data["attendance"])
+            actual_class_type = f"1:{actual_attendees}" if actual_attendees > 0 else class_type
+            
+            if actual_attendees < num_students and actual_attendees > 0:
+                st.info(f"💡 欠席者がいるため、実際の授業形態は「{actual_class_type}」として記録されます。")
+
             if st.button("🚀 全員の記録をまとめて保存する", type="primary", use_container_width=True):
                 with st.status("データを保存中...", expanded=True) as status:
                     for data in input_data_list:
@@ -414,7 +415,7 @@ def render_multi_input_page():
                             quiz_records=[],
                             date=date, 
                             teacher_name=teacher_name,
-                            class_type=class_type,
+                            class_type=actual_class_type,  # 🌟 ここで補正された授業形態（1:2など）を保存！
                             attendance=data.get("attendance", ""),
                             class_slot=class_slot,
                             advice=data.get("advice", ""),
@@ -479,7 +480,7 @@ def render_multi_input_page():
                         if k in st.session_state:
                             del st.session_state[k]
 
-                # 🌟 動的に作られたキー（d_s, n_e など）を一斉にお掃除
+                # 動的に作られたキー（d_s, n_e など）を一斉にお掃除
                 for key in list(st.session_state.keys()):
                     if key.startswith("prev_data_") or key.startswith("d_s_") or key.startswith("d_e_") or key.startswith("n_s_") or key.startswith("n_e_") or key.startswith("hw_ranges_num_") or key.startswith("adv_start_") or key.startswith("adv_end_") or key.startswith("q_name_") or key.startswith("q_chap_") or key.startswith("q_score_") or key.startswith("w_"):
                         del st.session_state[key]
