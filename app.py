@@ -116,14 +116,14 @@ def main():
         "💌 メッセージ送信"
     ]
 
-    if st.session_state['role'] in ['admin', 'owner', 'head_teacher']:
+    if st.session_state['role'] in ['admin', 'owner', 'am', 'head_teacher']:
         menu_options.extend([
             "📱 LINE用 学習レポート生成"
         ])
 
-    if st.session_state['role'] in ['admin', 'owner']:
+    if st.session_state['role'] in ['admin', 'owner', 'am']:
         menu_options.extend([
-            #"✅ 本日の出欠・座席表",#home.pyに統合
+            #"✅ 本日の出欠・座席表",
             "🔍 全生徒の過去ログ検索",
             #"💰 給与・交通費ダッシュボード",
             "📈 講師分析ダッシュボード",
