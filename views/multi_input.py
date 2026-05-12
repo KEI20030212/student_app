@@ -45,7 +45,7 @@ DRAFT_PREFIXES = (
     "class_date", "class_type", 
     "sb_", "sel_student_", "new_name_", "att_", "late_", "sub_", "texts_", "new_usage_text_", 
     "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_", "w_",
-    "done_start_", "done_end_", "conc_", "reac_", "hw_text_", "new_hw_text_", 
+    "cont_", "done_start_", "done_end_", "conc_", "reac_", "hw_text_", "new_hw_text_", 
     "n_start_", "n_end_", "advc_", "p_msg_", "next_h_"
 )
 
@@ -201,18 +201,28 @@ def render_multi_input_page():
                                         assigned_p = a_end - a_start + 1
 
                                 st.write("📝 **今回の宿題達成状況**")
-                                c_hw1, c_hw2 = st.columns(2)
-                                with c_hw1:
-                                    done_start = st.number_input("やった宿題 開始P", min_value=0, value=0, key=f"done_start_{i}")
-                                with c_hw2:
-                                    done_end = st.number_input("やった宿題 終了P", min_value=0, value=0, key=f"done_end_{i}")
                                 
-                                if done_end >= done_start and done_end > 0:
-                                    completed_p = done_end - done_start + 1
-                                else:
+                                # 🌟 新機能: 連続コマの判別チェックボックス
+                                is_continuous = st.checkbox("🔄 追加連続コマ（宿題チェックをスキップし、前回分を引き継ぐ）", key=f"cont_{i}")
+                                
+                                if is_continuous:
+                                    st.info("💡 連続コマモード：今回の宿題確認は行わず、前回の宿題をそのまま「次回の宿題指示」に引き継ぎます。")
                                     completed_p = 0
+                                    assigned_p = 0 # 宿題履行率の計算に悪影響を与えないようにゼロにする
+                                else:
+                                    c_hw1, c_hw2 = st.columns(2)
+                                    with c_hw1:
+                                        done_start = st.number_input("やった宿題 開始P", min_value=0, value=0, key=f"done_start_{i}")
+                                    with c_hw2:
+                                        done_end = st.number_input("やった宿題 終了P", min_value=0, value=0, key=f"done_end_{i}")
                                     
-                                st.caption(f"📊 シート保存データ ➡ 出した宿題(自動計算): **{assigned_p}** P / やった宿題: **{completed_p}** P")
+                                    if done_end >= done_start and done_end > 0:
+                                        completed_p = done_end - done_start + 1
+                                    else:
+                                        completed_p = 0
+                                        
+                                    st.caption(f"📊 シート保存データ ➡ 出した宿題(自動計算): **{assigned_p}** P / やった宿題: **{completed_p}** P")
+                                
                                 st.divider() 
 
                                 st.write("📚 **使用テキストと進捗**")
@@ -279,7 +289,7 @@ def render_multi_input_page():
                                 
                                 w_nums_for_sheet = ",".join(w_nums_for_sheet_list)
 
-                                # 🌟 【修正】calc_logicの関数を使って、"今日"の宿題達成率を計算！
+                                # 🌟 calc_logicの関数を使って、"今日"の宿題達成率を計算
                                 today_hw_rate = calculate_hw_rate(assigned_p, completed_p)
                                 motivation_rank = calculate_motivation_rank(today_hw_rate, current_quiz_pts, 0)
 
@@ -294,27 +304,35 @@ def render_multi_input_page():
                                 st.divider()
 
                                 st.write("🚀 **次回の宿題指示**")
-                                hw_text_options = ["🆕 新規テキスト入力"] + text_options
-                                selected_hw_text = st.selectbox("次回の宿題テキスト", hw_text_options, index=None, placeholder="テキストを選択", key=f"hw_text_{i}")
-
-                                if selected_hw_text == "🆕 新規テキスト入力":
-                                    new_text_name = st.text_input("新規テキスト名を入力", key=f"new_hw_text_{i}")
-                                    if new_text_name:
-                                        robust_api_call(add_new_textbook, new_text_name)
-                                        selected_hw_text = new_text_name
-                                        cached_get_textbook_master.clear()
-
-                                st.write("宿題の範囲")
-                                n_s_col, n_e_col = st.columns(2)
-                                next_start = n_s_col.number_input("次 開始P", min_value=0, value=0, key=f"n_start_{i}")
-                                next_end = n_e_col.number_input("次 終了P", min_value=0, value=0, key=f"n_end_{i}")
                                 
-                                if next_end >= next_start and next_end > 0:
-                                    next_hw_pages_str = f"P.{next_start}〜{next_end}"
+                                # 🌟 新機能: 連続コマの場合は前回の宿題をそのまま自動引き継ぎ！
+                                if is_continuous:
+                                    selected_hw_text = last_hw_text
+                                    next_hw_pages_str = str(last_hw_pages)
+                                    st.info(f"🔄 【自動引き継ぎ内容】\n\n📚 テキスト: **{selected_hw_text}**\n🎯 範囲: **{next_hw_pages_str}**")
                                 else:
-                                    next_hw_pages_str = "-"
+                                    # 連続コマでない場合は今まで通り入力させる
+                                    hw_text_options = ["🆕 新規テキスト入力"] + text_options
+                                    selected_hw_text = st.selectbox("次回の宿題テキスト", hw_text_options, index=None, placeholder="テキストを選択", key=f"hw_text_{i}")
+
+                                    if selected_hw_text == "🆕 新規テキスト入力":
+                                        new_text_name = st.text_input("新規テキスト名を入力", key=f"new_hw_text_{i}")
+                                        if new_text_name:
+                                            robust_api_call(add_new_textbook, new_text_name)
+                                            selected_hw_text = new_text_name
+                                            cached_get_textbook_master.clear()
+
+                                    st.write("宿題の範囲")
+                                    n_s_col, n_e_col = st.columns(2)
+                                    next_start = n_s_col.number_input("次 開始P", min_value=0, value=0, key=f"n_start_{i}")
+                                    next_end = n_e_col.number_input("次 終了P", min_value=0, value=0, key=f"n_end_{i}")
                                     
-                                st.caption(f"スプレッドシートに保存される範囲: {next_hw_pages_str}")
+                                    if next_end >= next_start and next_end > 0:
+                                        next_hw_pages_str = f"P.{next_start}〜{next_end}"
+                                    else:
+                                        next_hw_pages_str = "-"
+                                        
+                                    st.caption(f"スプレッドシートに保存される範囲: {next_hw_pages_str}")
 
                                 st.divider()
                                 advice = st.text_area("🗣️ 授業でのアドバイス（褒めた点など）", height=80, key=f"advc_{i}")
@@ -406,6 +424,7 @@ def render_multi_input_page():
                 for i in range(num_students):
                     keys_to_reset = [
                         f"name_{i}", f"att_{i}", f"late_{i}", f"sub_{i}", f"texts_{i}", 
+                        f"cont_{i}",  # 🌟 ここにも忘れずに追加！
                         f"done_start_{i}", f"done_end_{i}", f"adv_start_{i}", f"adv_end_{i}", 
                         f"num_q_{i}", f"conc_{i}", f"reac_{i}",
                         f"hw_text_{i}", f"n_start_{i}", f"n_end_{i}",
