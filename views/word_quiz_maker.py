@@ -59,7 +59,7 @@ def render_word_quiz_maker_page():
         elif quiz_name == "キクタン16問":
             q_range, a_range, p_size = "A1:I18", "J1:R18", "B5"
         elif quiz_name == "キクタン32問":
-            q_range, a_range, p_size = "A1:N18", "O1:AB18", "A4"
+            q_range, a_range, p_size = "A1:L18", "M1:Y18", "A4"
         else: # キクタン50問
             q_range, a_range, p_size = "A1:N27", "O1:AB27", "A3"
 
