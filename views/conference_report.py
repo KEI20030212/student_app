@@ -246,26 +246,33 @@ def render_conference_report(selected_student_option, info):
     # 3. 小テスト進捗の一覧（テキスト別サマリー）
     # ==========================================
     st.subheader("📊 小テスト（基礎学力）の定着状況")
-    if master_dict and not df_quiz.empty:
+    if master_dict is not None and not df_quiz.empty: # 🌟 修正：空でも通す
         df_quiz['点数'] = pd.to_numeric(df_quiz['点数'], errors='coerce')
         summary_data = []
         
         attempted_texts = df_quiz['テキスト'].dropna().unique()
         
         for text_name in attempted_texts:
-            if text_name not in master_dict:
-                continue
-                
-            chaps = master_dict[text_name]
-            total_chaps = len(chaps)
+            # そのテキストで80点以上取った「合格」単元数をカウント
             df_text = df_quiz[(df_quiz['テキスト'] == text_name) & (df_quiz['点数'] >= 80)]
             done_chaps = df_text['単元'].nunique() if '単元' in df_text.columns else 0
             
-            progress = int((done_chaps / total_chaps) * 100) if total_chaps > 0 else 0
+            # 🌟 新ロジック：マスタにあるかチェックし、なくても表示する！
+            if text_name in master_dict:
+                chaps = master_dict[text_name]
+                total_chaps = len(chaps)
+                progress = int((done_chaps / total_chaps) * 100) if total_chaps > 0 else 0
+                display_chaps = f"{done_chaps} / {total_chaps} 章"
+            else:
+                # マスタに未登録の場合は「受けた単元のうち、何単元合格したか」で計算
+                total_attempted = df_quiz[df_quiz['テキスト'] == text_name]['単元'].nunique()
+                progress = int((done_chaps / total_attempted) * 100) if total_attempted > 0 else 0
+                display_chaps = f"{done_chaps} / {total_attempted} 章 (マスタ未登録)"
+                
             summary_data.append({
                 "テキスト名": text_name,
                 "進捗率(%)": progress,
-                "合格章数": f"{done_chaps} / {total_chaps} 章"
+                "合格章数": display_chaps
             })
             
         if summary_data:
@@ -283,7 +290,6 @@ def render_conference_report(selected_student_option, info):
             st.info("集計できる小テストデータがありません。")
     else:
         st.info("小テストのデータがまだありません。")
-
     # ==========================================
     # 4. 弱点分析（おすすめデータ：今後の対策）
     # ==========================================
