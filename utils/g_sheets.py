@@ -271,7 +271,9 @@ def save_seating_data(seating_dict):
         ws.append_row(row)
 
 #student_portal.pyで使用
-def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定"):
+# 🌟 変更：引数の最後に contract_course="" を追加
+def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定", contract_course=""):
+    import gspread # もし上でimportされていなければ必要です
     gc = get_gc_client() 
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
@@ -279,7 +281,8 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
     all_data = ws.get_all_values()
     header = all_data[0]
     
-    required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分']
+    # 🌟 変更：契約コースの列がなければ自動で作るように追加
+    required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分', '契約コース']
     for col in required_cols:
         if col not in header:
             ws.update_cell(1, len(header) + 1, col)
@@ -291,7 +294,7 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
             row_index = i + 1 
             break
 
-    # 🌟 改善ポイント1: 既存のデータを取得しておく（契約コースなどが消えるのを防ぐため）
+    # 🌟 改善ポイント1: 既存のデータを取得しておく（他の列が消えるのを防ぐため）
     existing_row = all_data[row_index - 1] if row_index != -1 else [""] * len(header)
 
     row_dict = {
@@ -307,10 +310,11 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
         '最新偏差値': dev_score,
         '宿題履行率': hw_rate,
         '受験区分': exam_status,
-        '学校区分': school_type
+        '学校区分': school_type,
+        '契約コース': contract_course # 🌟 追加：ここで受け取った契約コースをセット
     }
 
-    # 🌟 改善ポイント2: 辞書にない列（契約コースなど）は既存データをそのまま残す
+    # 🌟 改善ポイント2: 辞書にない列（保護者の電話番号など）は既存データをそのまま残す
     row_to_save = []
     for i, col in enumerate(header):
         if col in row_dict:
