@@ -669,36 +669,34 @@ def add_new_textbook(new_name):
         return False
 
 def get_textbook_master():
-    import streamlit as st  # 画面にエラーを出すための魔法
+    """テキストと章、および単元名を取得する"""
+    import streamlit as st
     try:
         gc = get_gc_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
-        
         worksheet = sh.worksheet("テキスト情報一覧") 
-        records = worksheet.get_all_records()
         
-        # 🚨 【透視メガネ】もし列の名前がズレていたら画面に犯人を映し出す！
-        if len(records) > 0:
-            keys = list(records[0].keys())
-            if "テキスト" not in keys or "章" not in keys:
-                st.error(f"🚨 スプレッドシートの1行目の名前がズレています！今の名前: {keys}")
+        # 🌟 ゼロ落ち（01 が 1 になるバグ）を防ぐため numericise_ignore を追加
+        records = worksheet.get_all_records(numericise_ignore=["all"])
         
         master_dict = {}
         for row in records:
-            # 空白が入っていても安全に読み取る魔法
             text_name = str(row.get("テキスト", "")).strip()
             chap = str(row.get("章", "")).strip()
+            # 🌟 新しく追加した「単元名」列（または章名）を読み取る
+            chap_name = str(row.get("単元名", row.get("章名", ""))).strip()
             
             if text_name and chap:
                 if text_name not in master_dict:
-                    master_dict[text_name] = []
-                master_dict[text_name].append(chap)
+                    # リストではなく、章番号をキーにした辞書にする
+                    master_dict[text_name] = {}
+                master_dict[text_name][chap] = chap_name
                 
         return master_dict
         
     except Exception as e:
-        # 🚨 【透視メガネ】裏側でエラーが起きたら、その理由を画面に叫ぶ！
-        st.error(f"🚨 マスタ取得の裏側でエラー発生: {e}")
+        import pandas as pd
+        print(f"マスタ取得の裏側でエラー発生: {e}")
         return {}
 
 def update_student_homework_rate(student_name, *args):
