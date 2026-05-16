@@ -62,13 +62,28 @@ def ensure_global_sheets(sh):
         ws = sh.add_worksheet(title="設定_生徒情報", rows="100", cols="7")
         ws.append_row(['生徒名', '学年', '学校名', '志望校・目的', '受講科目', '能力', 'やる気'])
 
-def get_student_master():#「生徒のリスト（名簿全体）」が欲しいときに使う
+def _raw_get_student_master():
+    """
+    【裏方専用】Googleスプレッドシートから直接データを取得する（生通信）
+    ※この関数は外から直接呼ばない
+    """
+    import pandas as pd
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
-    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
-    # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
-    return df
+    return pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
+
+@st.cache_data(ttl=600)
+def get_student_master():
+    """
+    【全画面からの窓口】
+    ここで robust_api_call を使って安全に通信し、成功した結果だけを10分間キャッシュする最強の盾！
+    """
+    from utils.api_guard import robust_api_call
+    import pandas as pd
+    
+    # 生通信関数を robust_api_call で守りながら実行
+    return robust_api_call(_raw_get_student_master, fallback_value=pd.DataFrame())
 
 @st.cache_data(ttl=60)
 def get_student_info(student_name):#「特定の生徒1人だけの詳細情報」が欲しいときに使う
