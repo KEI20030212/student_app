@@ -97,7 +97,7 @@ def cached_calculate_attendance_rate(student_id, student_name):
 # 🎯 面談レポート画面のメイン関数
 # ==========================================
 def render_conference_report(selected_student_option, info):
-    
+    st.write(info)  # 👈 【追加】今システムが持っている情報を画面に全部表示する魔法
     # 🌟 IDと名前の分割＆自己修復機能
     if " - " in selected_student_option:
         student_id = selected_student_option.split(" - ")[0]
