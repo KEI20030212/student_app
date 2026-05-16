@@ -20,14 +20,6 @@ from views.analytics_dashboard import render_analytics_dashboard_page#改良済
 from views.my_salary import render_my_salary_page#変更なし
 from views.account_manager import render_account_manager_page#変更なし
 from views.finance_integrated import render_finance_integrated_page#改良済
-#from views.quiz_maker import render_quiz_maker_page
-#from views.dashboard import render_dashboard_page
-#from views.quiz_dashboard import render_quiz_list_page
-#from views.self_study_dashboard import render_self_study_dashboard
-#from views.quiz_list import render_quiz_list_page
-#from views.salary_dashboard import render_salary_dashboard_page
-#from views.tuition_dashboard import render_tuition_dashboard_page
-#from views.salary_combined import render_salary_combined_page
 # ==========================================
 # 🛠️ 2. 裏方部隊（utils）のインポート
 # ==========================================
@@ -54,8 +46,8 @@ def login_screen():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("login_form"):
-            username = st.text_input("👤 ユーザーID")
-            password = st.text_input("🔑 パスワード", type="password")
+            username = st.text_input("👤 ユーザーID", autocomplete="username")
+            password = st.text_input("🔑 パスワード", type="password", autocomplete="current-password")
             submit = st.form_submit_button("ログイン 🚀", use_container_width=True)
             if submit:
                 if username == ADMIN_USER and password == ADMIN_PASS:
@@ -101,18 +93,10 @@ def main():
     menu_options = [
         "📢 ホーム・連絡・出席掲示板",
         "📝 授業・自習記録の入力 (出欠対応)",
-        #"🖨️ 小テスト作成・印刷",
         "🏫 教室・学習状況ダッシュボード",
         "👤 生徒個別ポータル",
         "💯 小テスト管理センター",
         "🎒 学校課題管理",
-        #"👤 生徒詳細 ＆ テスト成績",
-        #"🌐 クラス全体ダッシュボード",
-        #"📊 個別分析・履歴・振替管理",
-        #"📝 小テスト進捗マップ",
-        #"📊 自習時間ランキング",
-        #"💴 自分の給与確認",
-        #"💸 給与メニュー",
         "💌 メッセージ送信"
     ]
 
@@ -123,12 +107,9 @@ def main():
 
     if st.session_state['role'] in ['admin', 'owner', 'am']:
         menu_options.extend([
-            #"✅ 本日の出欠・座席表",
             "🔍 全生徒の過去ログ検索",
-            #"💰 給与・交通費ダッシュボード",
             "📈 講師分析ダッシュボード",
             "⚙️ アカウント・システム設定",
-            #"💴 月謝（請求額）管理ダッシュボード"
             "💰 財務・請求ダッシュボード"
         ])
     else:
@@ -149,27 +130,16 @@ def main():
     # 🎯 選ばれたメニューに応じて、該当する画面関数を呼び出すだけ！
     # ==========================================
     if page == "📢 ホーム・連絡・出席掲示板": render_home_page()
-    #elif page == "✅ 本日の出欠・座席表": render_attendance_seat_page()　　#home.pyに統合
     elif page == "📝 授業・自習記録の入力 (出欠対応)": render_combined_input_page()
-    #elif page == "🖨️ 小テスト作成・印刷": render_quiz_maker_page()
     elif page == "👤 生徒個別ポータル": render_student_portal_page()
     elif page == "💯 小テスト管理センター": render_quiz_management_page()
-    #elif page == "👤 生徒詳細 ＆ テスト成績": render_student_details_page()
     elif page == "🏫 教室・学習状況ダッシュボード":render_combined_dashboard_page()
     elif page == "🎒 学校課題管理": render_school_homework_page()
-    #elif page == "🌐 クラス全体ダッシュボード": render_dashboard_page()
-    #elif page == "📝 小テスト進捗マップ":render_quiz_list_page()
-    #elif page == "📊 自習時間ランキング":render_self_study_dashboard()
-    #elif page == "📊 個別分析・履歴・振替管理": render_analysis_page(),
-    # elif page == "💯 小テスト成績・アラート": render_quiz_list_page(textbook_master)
     elif page == "📱 LINE用 学習レポート生成": render_line_report_page()
     elif page == "🔍 全生徒の過去ログ検索": render_search_page()
-    #elif page == "💰 給与・交通費ダッシュボード": render_salary_dashboard_page(),
     elif page == "📈 講師分析ダッシュボード": render_analytics_dashboard_page()
-    #elif page == "💴 月謝（請求額）管理ダッシュボード": render_tuition_dashboard_page()
     elif page == "💴 自分の給与確認": render_my_salary_page()
     elif page == "💰 財務・請求ダッシュボード": render_finance_integrated_page()
-    #elif page == "💸 給与メニュー": render_salary_combined_page()
     elif page == "💌 メッセージ送信": render_message_sender_page()
     elif page == "⚙️ アカウント・システム設定": render_account_manager_page()
 
