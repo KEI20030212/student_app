@@ -3,6 +3,7 @@ import pandas as pd
 import altair as alt 
 import datetime 
 import time 
+import re # 🌟 文字列から数字を抽出するために追加
 
 # 🌟 変更: get_student_info を削除し、get_student_master に変更
 from utils.g_sheets import (
@@ -69,17 +70,17 @@ def render_student_details_page(selected_student_option):
             st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
             st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
             st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
+            # 🌟 追加：契約コースの表示
+            st.markdown(f"**📋 契約コース**: {info.get('契約コース', '') or '未設定'}")
             
             if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
                 with st.expander("✏️ 基本情報を編集する (教室長のみ)"):
                     with st.form("edit_student_info_form"):
                         new_grade = st.text_input("学年 (例: 中2)", value=info.get('学年', ''))
                         
-                        # 🌟 変更："未設定" を排除し、先頭を空欄("")にする
                         c_ex1, c_ex2 = st.columns(2)
                         
                         exam_opts = ["", "受験生"]
-                        # 古いデータに"未設定"が残っていても空欄として扱う
                         current_exam = str(info.get('受験区分', '')).replace('未設定', '')
                         ex_idx = exam_opts.index(current_exam) if current_exam in exam_opts else 0
                         new_exam = c_ex1.selectbox("🔥 受験区分", exam_opts, index=ex_idx)
@@ -93,7 +94,30 @@ def render_student_details_page(selected_student_option):
                         new_target = st.text_input("志望校・通塾目的", value=info.get('志望校・目的', ''))
                         new_subjects = st.text_input("受講科目 (例: 英語, 数学)", value=info.get('受講科目', ''))
                         
+                        # 🌟 追加：契約コースの入力欄
+                        st.markdown("##### 📋 契約コース (回数/月)")
+                        raw_course = str(info.get('契約コース', ''))
+                        
+                        # スプレッドシートの文字列から数字を自動抽出（パース）
+                        b_match = re.search(r'Bコース[:：](\d+)', raw_course)
+                        q_match = re.search(r'Qコース[:：](\d+)', raw_course)
+                        b_default = int(b_match.group(1)) if b_match else None
+                        q_default = int(q_match.group(1)) if q_match else None
+                        
+                        cc1, cc2 = st.columns(2)
+                        b_val = cc1.number_input("Bコース", min_value=0, value=b_default, step=1)
+                        q_val = cc2.number_input("Qコース", min_value=0, value=q_default, step=1)
+                        
                         if st.form_submit_button("💾 基本情報を保存", type="primary"):
+                            
+                            # 🌟 追加：入力された数字をスプレッドシート保存用の文字列に再結合
+                            course_parts = []
+                            if b_val and b_val > 0:
+                                course_parts.append(f"Bコース:{b_val}")
+                            if q_val and q_val > 0:
+                                course_parts.append(f"Qコース:{q_val}")
+                            new_contract_str = "、".join(course_parts)
+
                             with st.spinner("☁️ 情報を保存中...（混雑時は自動で再試行します）"):
                                 def _update_info():
                                     update_student_info(
@@ -109,7 +133,8 @@ def render_student_details_page(selected_student_option):
                                         info.get('最新偏差値', 50), 
                                         info.get('宿題履行率', 100),
                                         new_exam,        
-                                        new_school_type  
+                                        new_school_type,
+                                        new_contract_str # 🌟 追加：結合した契約コースの文字列を渡す
                                     )
                                     return True
                                 
@@ -152,7 +177,6 @@ def render_student_details_page(selected_student_option):
             except ValueError: 
                 current_hw_rate = 0.0
                 
-            # 🌟 追撃のAPIエラー対策！ここにもガードを配置！
             quiz_master = robust_api_call(get_quiz_master_dict, fallback_value={})
             quiz_records = robust_api_call(lambda: get_student_quiz_records(selected_student), fallback_value=[])
             total_quiz_pts = 0
@@ -165,7 +189,6 @@ def render_student_details_page(selected_student_option):
                 )
                 total_quiz_pts += pts
             
-            # 🌟 自習ポイントの取得もガード！
             self_study_pts = robust_api_call(lambda: get_student_self_study_points(selected_student), fallback_value=0)
             current_motivation = calculate_motivation_rank(current_hw_rate, total_quiz_pts, self_study_pts)
             
