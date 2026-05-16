@@ -1,16 +1,14 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import re # 🌟 追加: 正規表現用
+import re 
 
-# ==========================================
-# 🌟 utils/g_sheets.py から専用関数を呼び出し
-# ==========================================
 from utils.g_sheets import (
     get_student_master, 
     get_quiz_master_dict,                
     save_quiz_to_dedicated_sheet,        
-    load_quiz_records
+    load_quiz_records,
+    get_textbook_master # 🌟 追加: テキストマスタをインポート
 )
 
 from utils.api_guard import robust_api_call
@@ -30,31 +28,32 @@ def cached_get_quiz_details():
 def cached_load_all_quizzes():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
+# 🌟 追加: テキストマスタのキャッシュ取得
+@st.cache_data(ttl=600)  
+def cached_get_textbook_master():
+    return robust_api_call(get_textbook_master, fallback_value={})
+
 # ==========================================
 
 def render_quiz_list_page():
     st.header("📝 小テスト進捗＆習熟度マップ")
     st.write("実施した小テストの結果を入力・確認できるページです🎨")
 
-    # 1. 🌟 生徒の選択（生徒マスターを使用）
     df_students = cached_get_student_master()
     
     if df_students.empty:
         st.error("生徒データの取得に失敗しました。時間をおいて再読み込みしてください。")
         st.stop()
 
-    # "S001 - 山田太郎" のリストを作成
     student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
     selected_student_option = st.selectbox("👤 生徒を選択", ["-- 選択 --"] + student_options)
     
     if selected_student_option == "-- 選択 --":
         st.stop()
 
-    # 🌟 IDと名前を分割
     student_id = selected_student_option.split(" - ")[0]
     student_name = selected_student_option.split(" - ")[1]
 
-    # 2. 小テスト設定の取得
     quiz_details = cached_get_quiz_details()
     
     quiz_names = []
@@ -64,11 +63,8 @@ def render_quiz_list_page():
             if q_name not in quiz_names:
                 quiz_names.append(q_name)
 
-    # ==========================================
-    # 🌟 小テスト結果の入力フォーム
-    # ==========================================
     with st.expander("📝 小テスト結果を登録する"):
-        st.write(f"**{student_name}** さんの結果を入力します。") # 名前だけを表示
+        st.write(f"**{student_name}** さんの結果を入力します。") 
         
         with st.form("quiz_input_form"):
             col1, col2 = st.columns(2)
@@ -100,7 +96,7 @@ def render_quiz_list_page():
                             success = robust_api_call(
                                 save_quiz_to_dedicated_sheet,
                                 test_date.strftime("%Y/%m/%d"), 
-                                student_name,  # 🌟 注意: スプレッドシートには「名前」だけを保存する！
+                                student_name,  
                                 target_quiz,  
                                 target_unit,  
                                 score,
@@ -111,7 +107,7 @@ def render_quiz_list_page():
                             
                             if success:
                                 st.success(f"【{target_quiz} - {target_unit}】を {score}点で記録しました！")
-                                cached_load_all_quizzes.clear() # 🌟 キャッシュをクリアして最新を読み込ませる
+                                cached_load_all_quizzes.clear() 
                                 time.sleep(1)
                                 st.rerun()
                             else:
@@ -123,14 +119,15 @@ def render_quiz_list_page():
     # 🌟 習熟度マップの表示ロジック
     # ==========================================
     with st.spinner("習熟度データを集計中..."):
-        # 🌟 全データを一括で取得してから、選んだ生徒の分だけ抜き出す！
         df_all_quizzes = cached_load_all_quizzes()
+        
+        # 🌟 ここで単元名マスタも取得しておく
+        textbook_master = cached_get_textbook_master()
         
         if "APIエラー発生" in df_all_quizzes.columns:
             st.error("データの取得中にエラーが発生しました。")
             st.stop()
             
-        # 選んだ生徒の名前でフィルタリング
         if not df_all_quizzes.empty and '名前' in df_all_quizzes.columns:
             df_quiz = df_all_quizzes[df_all_quizzes['名前'] == student_name].copy()
         else:
@@ -177,6 +174,23 @@ def render_quiz_list_page():
                     continue
 
                 pivot_df = pivot_df[sorted(pivot_df.columns.tolist(), key=sort_key)]
+
+                # 🌟 【新機能】列の数字を「数字: 単元名」に自動変換！
+                col_mapping = {}
+                t_master = textbook_master.get(q_name, {}) # 対象のテキストの単元リストを取得
+                
+                for col in pivot_df.columns:
+                    chap_str = str(col)
+                    chap_name = t_master.get(chap_str, "")
+                    if chap_name:
+                        # 単元名があれば合体させる
+                        col_mapping[col] = f"{chap_str}: {chap_name}"
+                    else:
+                        # なければ「第○回」とだけ表示
+                        col_mapping[col] = f"第{chap_str}回"
+                        
+                # 列名を一括リネーム
+                pivot_df = pivot_df.rename(columns=col_mapping)
 
                 def add_icon(val):
                     if pd.isna(val) or val == "": return ""
