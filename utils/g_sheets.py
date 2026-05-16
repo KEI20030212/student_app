@@ -62,12 +62,11 @@ def ensure_global_sheets(sh):
         ws = sh.add_worksheet(title="設定_生徒情報", rows="100", cols="7")
         ws.append_row(['生徒名', '学年', '学校名', '志望校・目的', '受講科目', '能力', 'やる気'])
 
-@st.cache_data(ttl=3600) 
 def get_student_master():#「生徒のリスト（名簿全体）」が欲しいときに使う
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
-    df = pd.DataFrame(ws.get_all_records())
+    df = pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
     # 在籍中の生徒だけに絞り込むなどの処理もここで可能です
     return df
 
