@@ -58,7 +58,6 @@ def cached_load_quiz_data(student_name):
     # 🌟 引数ありの関数は lambda で渡す
     return robust_api_call(lambda: load_quiz_data_from_dedicated_sheet(student_name), fallback_value=pd.DataFrame())
 
-# 🌟 変更: load_raw_data ではなく get_all_logs を使用し、IDでフィルタリング！
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_calculate_attendance_rate(student_id, student_name):
     from utils.g_sheets import get_all_logs
@@ -97,7 +96,6 @@ def cached_calculate_attendance_rate(student_id, student_name):
 # ==========================================
 # 🎯 面談レポート画面のメイン関数
 # ==========================================
-# 🌟 引数名を selected_student_option に変更
 def render_conference_report(selected_student_option, info):
     
     # 🌟 IDと名前の分割＆自己修復機能
@@ -155,7 +153,6 @@ def render_conference_report(selected_student_option, info):
     col1, col2, col3, col4 = st.columns(4)
     
     with st.spinner("出席率を計算中..."):
-        # 🌟 引数に student_id と student_name を渡すように変更
         attendance_rate = cached_calculate_attendance_rate(student_id, student_name)
     
     hw_rate_str = str(info.get('宿題履行率', '0')).replace('%', '')
@@ -169,14 +166,24 @@ def render_conference_report(selected_student_option, info):
     
     total_quiz_attempts = len(df_quiz) if not df_quiz.empty else 0
     col3.metric("📝 小テスト総回数", f"{total_quiz_attempts} 回")
-    col4.metric("🎯 志望校・目的", info.get('志望校・目的', '未設定'))
+    
+    # 🌟 【新機能】列名が少し違っていても絶対に探し出す最強の検索ロジック！
+    target_goal = "未設定"
+    for key, value in info.items():
+        if "志望校" in str(key) or "目的" in str(key) or "目標" in str(key):
+            val_str = str(value).strip()
+            # 空欄やPandas特有の NaN じゃない場合のみ採用
+            if val_str and val_str.lower() != "nan":
+                target_goal = val_str
+                break
+                
+    col4.metric("🎯 志望校・目標", target_goal)
 
     st.write("#### 📅 月別の自習時間（努力の可視化）")
     if not df_monthly_ss.empty:
-        # 横軸が時間、縦軸が月のバーチャート
         ss_chart = alt.Chart(df_monthly_ss).mark_bar(
             cornerRadiusEnd=4, 
-            color='#ff7f0e', # 教室カラーなどに合わせて調整してください
+            color='#ff7f0e', 
             size=20
         ).encode(
             x=alt.X('自習時間(分):Q', title='合計自習時間 (分)'),
@@ -184,7 +191,6 @@ def render_conference_report(selected_student_option, info):
             tooltip=['年月', '自習時間(分)']
         ).properties(height=200)
 
-        # 棒の横に数値を表示
         ss_text = ss_chart.mark_text(
             align='left',
             baseline='middle',
@@ -246,25 +252,22 @@ def render_conference_report(selected_student_option, info):
     # 3. 小テスト進捗の一覧（テキスト別サマリー）
     # ==========================================
     st.subheader("📊 小テスト（基礎学力）の定着状況")
-    if master_dict is not None and not df_quiz.empty: # 🌟 修正：空でも通す
+    if master_dict is not None and not df_quiz.empty: 
         df_quiz['点数'] = pd.to_numeric(df_quiz['点数'], errors='coerce')
         summary_data = []
         
         attempted_texts = df_quiz['テキスト'].dropna().unique()
         
         for text_name in attempted_texts:
-            # そのテキストで80点以上取った「合格」単元数をカウント
             df_text = df_quiz[(df_quiz['テキスト'] == text_name) & (df_quiz['点数'] >= 80)]
             done_chaps = df_text['単元'].nunique() if '単元' in df_text.columns else 0
             
-            # 🌟 新ロジック：マスタにあるかチェックし、なくても表示する！
             if text_name in master_dict:
                 chaps = master_dict[text_name]
                 total_chaps = len(chaps)
                 progress = int((done_chaps / total_chaps) * 100) if total_chaps > 0 else 0
                 display_chaps = f"{done_chaps} / {total_chaps} 章"
             else:
-                # マスタに未登録の場合は「受けた単元のうち、何単元合格したか」で計算
                 total_attempted = df_quiz[df_quiz['テキスト'] == text_name]['単元'].nunique()
                 progress = int((done_chaps / total_attempted) * 100) if total_attempted > 0 else 0
                 display_chaps = f"{done_chaps} / {total_attempted} 章 (マスタ未登録)"
@@ -290,16 +293,26 @@ def render_conference_report(selected_student_option, info):
             st.info("集計できる小テストデータがありません。")
     else:
         st.info("小テストのデータがまだありません。")
+
     # ==========================================
     # 4. 弱点分析（おすすめデータ：今後の対策）
     # ==========================================
     st.subheader("💡 優先して復習すべき単元（自動ピックアップ）")
     if not df_quiz.empty:
+        df_quiz['点数'] = pd.to_numeric(df_quiz['点数'], errors='coerce').fillna(100)
         df_weak = df_quiz[df_quiz['点数'] < 60].sort_values(by='日時', ascending=False).head(5)
+        
         if not df_weak.empty:
             st.write("以下の単元は、直近のテストで点数が伸び悩んだため、次回の授業や講習で優先的に対策を行います。")
-            display_weak = df_weak[['日時', 'テキスト', '単元', '点数']]
             
-            st.table(display_weak.set_index("日時"))
+            desired_columns = ['日時', 'テキスト', '単元', '点数', 'ミス番号', '間違えた問題', 'ミス問題番号', 'ミス']
+            available_columns = [col for col in desired_columns if col in df_weak.columns]
+            
+            display_weak = df_weak[available_columns]
+            
+            if '日時' in display_weak.columns:
+                st.table(display_weak.set_index("日時"))
+            else:
+                st.table(display_weak)
         else:
             st.success("現在、極端に点数が低い（苦手な）単元は見当たりません！順調です。")
