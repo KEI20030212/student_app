@@ -169,7 +169,7 @@ def render_conference_report(selected_student_option, info):
     
     total_quiz_attempts = len(df_quiz) if not df_quiz.empty else 0
     col3.metric("📝 小テスト総回数", f"{total_quiz_attempts} 回")
-    col4.metric("🎯 志望校・目標", info.get('志望校・目的', '未設定'))
+    col4.metric("🎯 志望校・目的", info.get('志望校・目的', '未設定'))
 
     st.write("#### 📅 月別の自習時間（努力の可視化）")
     if not df_monthly_ss.empty:
