@@ -292,7 +292,7 @@ def render_conference_report(selected_student_option, info):
         df_weak = df_quiz[df_quiz['点数'] < 60].sort_values(by='日時', ascending=False).head(5)
         if not df_weak.empty:
             st.write("以下の単元は、直近のテストで点数が伸び悩んだため、次回の授業や講習で優先的に対策を行います。")
-            display_weak = df_weak[['日時', 'テキスト', '単元', '点数', 'ミス番号']]
+            display_weak = df_weak[['日時', 'テキスト', '単元', '点数']]
             
             st.table(display_weak.set_index("日時"))
         else:
