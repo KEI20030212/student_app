@@ -461,7 +461,7 @@ def render_multi_input_page():
                                             if key.startswith(f"prev_data_{name}_"):
                                                 del st.session_state[key]
                                                 
-                                    st.cache_data.clear()
+                                    # 🚨 修正ポイント：ここにあった st.cache_data.clear() を削除しました！！
                                     time.sleep(1.5)
                                     st.rerun()
 
