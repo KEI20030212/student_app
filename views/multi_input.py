@@ -43,7 +43,7 @@ def cached_get_textbook_master():
 def cached_get_quiz_master():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 
-# 🌟 新しい入力項目を一時保存対象に追加（タブ数も記憶させます）
+# 🌟 一時保存対象のキー（プレフィックス）
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
@@ -51,6 +51,14 @@ DRAFT_PREFIXES = (
     "cont", "done_start", "done_end", "conc", "reac", "hw_texts", "new_hw_text", 
     "n_start", "n_end", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num"
 )
+
+# 🌟 新機能：再描画の直前に、画面の入力状態を無理やりsession_stateに焼き付ける関数
+def force_auto_save():
+    for k, v in st.session_state.items():
+        if any(k.startswith(p) for p in DRAFT_PREFIXES):
+            # Widgetの値は自動的にsession_stateに入っていますが、
+            # 再描画で飛ぶのを防ぐため、値を明示的に上書きして固定します
+            st.session_state[k] = v
 
 def render_multi_input_page():
     user_id = st.session_state.get('user_id', st.session_state.get('username', 'default_user'))
@@ -64,19 +72,16 @@ def render_multi_input_page():
         if c1.button("💾 保存", use_container_width=True):
             draft = {}
             for k, v in st.session_state.items():
-                if k.startswith(DRAFT_PREFIXES):
+                if any(k.startswith(p) for p in DRAFT_PREFIXES):
                     draft[k] = v
-                    
             with open(draft_file, "wb") as f:
                 pickle.dump(draft, f)
-                
             st.success("鉄壁保存しました！")
             
         if c2.button("📂 復元", use_container_width=True):
             if os.path.exists(draft_file):
                 with open(draft_file, "rb") as f:
                     draft = pickle.load(f)
-                    
                 for k, v in draft.items():
                     st.session_state[k] = v
                 st.success("復元しました！")
@@ -116,21 +121,19 @@ def render_multi_input_page():
         quiz_names = ["設定なし"]
 
 
-    # ==========================================
-    # 🌟 【新機能】授業コマ（タブ）の追加・削除コントロール
-    # ==========================================
     st.write("### 🗂️ 授業コマの管理")
     num_blocks = st.session_state.get('num_blocks', 1)
 
     col_add, col_del, _ = st.columns([2, 2, 6])
     with col_add:
         if st.button("➕ 新しいコマ（タブ）を追加", use_container_width=True):
+            force_auto_save() # 🌟 リロード直前に全入力を裏へ強制セーブ！
             st.session_state['num_blocks'] = num_blocks + 1
             st.rerun()
     with col_del:
         if num_blocks > 1:
             if st.button("➖ 最後のタブを削除", use_container_width=True):
-                # 削除するタブの入力データをきれいにお掃除
+                force_auto_save() # 🌟 リロード直前に全入力を裏へ強制セーブ！
                 b_to_delete = num_blocks - 1
                 for key in list(st.session_state.keys()):
                     if f"_{b_to_delete}" in key:
@@ -138,10 +141,8 @@ def render_multi_input_page():
                 st.session_state['num_blocks'] = num_blocks - 1
                 st.rerun()
 
-    # タブの生成
     tabs = st.tabs([f"📝 コマ {b+1}" for b in range(num_blocks)])
     
-    # お掃除を一番最後に遅らせるための「しおり」
     single_save_triggered = None
     all_save_triggered = None
 
@@ -149,7 +150,7 @@ def render_multi_input_page():
         with tabs[b]:
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.5, 2])
-                # 🌟 すべての入力キーに「b（何番目のタブか）」を割り振って完全独立させる！
+                
                 date = c1.date_input("授業日", datetime.date.today(), key=f"class_date_{b}")
                 teacher_name = c2.selectbox("👨‍🏫 担当講師", teacher_names, index=None, placeholder="講師を選択", key=f"sb_teacher_{b}")
                 class_type = c3.radio("👥 授業形態", ["1:1", "1:2", "1:3"], horizontal=True, key=f"class_type_{b}")
@@ -163,7 +164,7 @@ def render_multi_input_page():
 
             if not teacher_name or not class_slot:
                 st.info(f"👆 コマ {b+1} の「担当講師」と「授業コマ」を選択してください。")
-                continue # 選択されるまでこのタブの描画はストップ
+                continue 
 
             num_students = int(class_type.split(":")[1])
             st.divider()
@@ -414,9 +415,6 @@ def render_multi_input_page():
                                         "next_hw_pages": next_hw_pages_str
                                     })
 
-                                    # ==========================================
-                                    # 👤 1人だけを個別に保存するボタン
-                                    # ==========================================
                                     st.divider()
                                     if st.button(f"👤 {name} の記録だけを個別に保存", key=f"save_single_{b}_{i}", use_container_width=True):
                                         with st.status(f"{name} のデータを保存中...", expanded=True) as status:
@@ -449,7 +447,8 @@ def render_multi_input_page():
                                             status.update(label="保存完了！", state="complete", expanded=False)
                                         st.success(f"✅ {name} の記録を保存しました！")
                                         
-                                        # 🚨 ここでは即座に消さず「しおり」だけ挟んでおき、一番最後でお掃除する！
+                                        # 🚨 他のデータが消えないよう、リロード直前に裏保存！
+                                        force_auto_save()
                                         single_save_triggered = (b, i, name)
 
             st.divider()
@@ -460,9 +459,6 @@ def render_multi_input_page():
                 if actual_attendees < num_students and actual_attendees > 0:
                     st.info(f"💡 欠席者がいるため、実際の授業形態は「{actual_class_type}」として記録されます。")
 
-                # ==========================================
-                # 🚀 コマ全体の記録をまとめて保存するボタン
-                # ==========================================
                 if st.button(f"🚀 コマ {b+1} の全員の記録をまとめて保存する", type="primary", key=f"save_all_{b}", use_container_width=True):
                     with st.status("データを保存中...", expanded=True) as status:
                         for data in input_data_list:
@@ -500,7 +496,8 @@ def render_multi_input_page():
 
                     st.success(f"✅ コマ {b+1}（{actual_attendees}名）の記録を保存しました！")
                     
-                    # しおりを挟んで一番最後でお掃除する
+                    # 🚨 他のデータが消えないよう、リロード直前に裏保存！
+                    force_auto_save()
                     all_save_triggered = (b, num_students)
 
 
@@ -508,7 +505,6 @@ def render_multi_input_page():
     # 🧹 一番最後での遅延お掃除処理（他のタブを巻き添えにしない魔法）
     # ==========================================
     
-    # 👤 1人だけ保存した場合のお掃除
     if single_save_triggered:
         b_idx, i_idx, saved_name = single_save_triggered
         target_prefixes = [
@@ -518,7 +514,6 @@ def render_multi_input_page():
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
             "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e"
         ]
-        # 保存したコマの、保存した生徒のキーだけをスナイプ削除
         for key in list(st.session_state.keys()):
             for p in target_prefixes:
                 if key == f"{p}_{b_idx}_{i_idx}" or key.startswith(f"{p}_{b_idx}_{i_idx}_"):
@@ -533,16 +528,13 @@ def render_multi_input_page():
         time.sleep(1.5)
         st.rerun()
 
-    # 🚀 コマ全員まとめて保存した場合のお掃除
     if all_save_triggered:
         b_idx, students_count = all_save_triggered
         
-        # 1. そのコマの共通設定（日付・講師など）を削除
         for k in ["class_date", "sb_teacher", "class_type", "sb_class_slot"]:
             if f"{k}_{b_idx}" in st.session_state:
                 del st.session_state[f"{k}_{b_idx}"]
 
-        # 2. そのコマの全生徒の入力欄を削除
         target_prefixes = [
             "sel_student", "new_name", "att", "late", "sub", "cont", 
             "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
@@ -557,9 +549,6 @@ def render_multi_input_page():
                         del st.session_state[key]
                         break
         
-        if "draft_data" in st.session_state:
-            del st.session_state["draft_data"]
-            
         st.cache_data.clear()
         time.sleep(1.5)
         st.rerun()
