@@ -47,7 +47,7 @@ def cached_get_quiz_master():
 DRAFT_PREFIXES = (
     "class_date", "class_type", 
     "sb_", "sel_student_", "new_name_", "att_", "late_", "sub_", "texts_", "new_usage_text_", 
-    "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_",
+    "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_", "w_",
     "cont_", "done_start_", "done_end_", "conc_", "reac_", "hw_texts_", "new_hw_text_", 
     "n_start_", "n_end_", "advc_", "p_msg_", "next_h_", "d_s_", "d_e_", "n_s_", "n_e_", "hw_ranges_num_"
 )
@@ -161,7 +161,7 @@ def render_multi_input_page():
                             st.warning("欠席のため、進捗・テスト入力はスキップされます。")
                             input_data_list.append({
                                 "student_id" : student_id, "name": name, "subject": "-", "text_name": "-", "advanced_p": "-", 
-                                "quiz_records": [], "attendance": attendance,
+                                "quiz_records": [], "w_nums_for_sheet": "", "attendance": attendance,
                                 "late_time": late_time, "concentration": "-", "reaction": "-",
                                 "advice": "-", "parent_msg": "-", "next_handover": "-",
                                 "assigned_p": 0, "completed_p": 0, "motivation_rank": 0, 
@@ -283,6 +283,7 @@ def render_multi_input_page():
                                 
                                 num_quizzes = st.number_input("💯 小テスト実施回数", min_value=0, max_value=5, value=0, step=1, key=f"num_q_{i}")
                                 quiz_records = []
+                                w_nums_for_sheet_list = []
                                 current_quiz_pts = 0 
                                 
                                 if num_quizzes > 0:
@@ -297,11 +298,17 @@ def render_multi_input_page():
                                             with col_q2:
                                                 score = st.number_input(f"点数", min_value=0, max_value=100, value=100, step=1, key=f"q_score_{i}_{q_idx}")
                                             
+                                            w_nums = st.text_input(f"ミス問題番号 (任意)", key=f"w_{i}_{q_idx}")
+                                            
                                             quiz_records.append({
                                                 "quiz_name": q_name or "不明", "unit": target_chap, "score": score
                                             })
+                                            if w_nums:
+                                                w_nums_for_sheet_list.append(w_nums)
                                             current_quiz_pts += calculate_quiz_points(score, q_name, quiz_details)
                                 
+                                w_nums_for_sheet = ",".join(w_nums_for_sheet_list)
+
                                 today_hw_rate = calculate_hw_rate(assigned_p, completed_p)
                                 motivation_rank = calculate_motivation_rank(today_hw_rate, current_quiz_pts, 0)
 
@@ -366,7 +373,7 @@ def render_multi_input_page():
                                 input_data_list.append({
                                     "student_id": student_id, "name": name, "subject": subject, "text_name": text_name_str,
                                     "advanced_p": advanced_p_str, "quiz_records": quiz_records, 
-                                    "attendance": attendance,
+                                    "w_nums_for_sheet": w_nums_for_sheet, "attendance": attendance,
                                     "late_time": late_time, "concentration": concentration or "-", "reaction": reaction or "-",
                                     "advice": advice, "parent_msg": parent_msg, "next_handover": next_handover,
                                     "assigned_p": assigned_p, "completed_p": completed_p, "advanced_p_str": advanced_p_str,
@@ -376,7 +383,7 @@ def render_multi_input_page():
                                 })
 
                                 # ==========================================
-                                # 🌟 【新機能】この生徒だけの記録を個別に保存するボタン！
+                                # 🌟 【修正】他の生徒を巻き添えにしない最強の個別お掃除ロジック！
                                 # ==========================================
                                 st.divider()
                                 if st.button(f"👤 {name} の記録だけを個別に保存", key=f"save_single_{i}", use_container_width=True):
@@ -434,13 +441,26 @@ def render_multi_input_page():
 
                                     st.success(f"✅ {name} の記録を保存しました！")
                                     
-                                    # 🧹 個別の入力欄だけをきれいにお掃除する魔法
+                                    # 🧹 その生徒（i番目）の入力欄だけを正確に狙い撃ちしてお掃除する魔法
+                                    target_prefixes = [
+                                        "sel_student", "new_name", "att", "late", "sub", "cont", 
+                                        "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
+                                        "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
+                                        "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
+                                        "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e"
+                                    ]
                                     for key in list(st.session_state.keys()):
-                                        if key.endswith(f"_{i}") or f"_{i}_" in key:
-                                            del st.session_state[key]
-                                    if f"prev_data_{name}_{subject}" in st.session_state:
-                                        del st.session_state[f"prev_data_{name}_{subject}"]
-                                        
+                                        for p in target_prefixes:
+                                            # 「p_0」に完全一致、または「p_0_」から始まるキーだけを削除
+                                            if key == f"{p}_{i}" or key.startswith(f"{p}_{i}_"):
+                                                del st.session_state[key]
+                                                break
+                                                
+                                    if name:
+                                        for key in list(st.session_state.keys()):
+                                            if key.startswith(f"prev_data_{name}_"):
+                                                del st.session_state[key]
+                                                
                                     st.cache_data.clear()
                                     time.sleep(1.5)
                                     st.rerun()
@@ -537,7 +557,7 @@ def render_multi_input_page():
                             del st.session_state[k]
 
                 for key in list(st.session_state.keys()):
-                    if key.startswith("prev_data_") or key.startswith("d_s_") or key.startswith("d_e_") or key.startswith("n_s_") or key.startswith("n_e_") or key.startswith("hw_ranges_num_") or key.startswith("adv_start_") or key.startswith("adv_end_") or key.startswith("q_name_") or key.startswith("q_chap_") or key.startswith("q_score_"):
+                    if key.startswith("prev_data_") or key.startswith("d_s_") or key.startswith("d_e_") or key.startswith("n_s_") or key.startswith("n_e_") or key.startswith("hw_ranges_num_") or key.startswith("adv_start_") or key.startswith("adv_end_") or key.startswith("q_name_") or key.startswith("q_chap_") or key.startswith("q_score_") or key.startswith("w_"):
                         del st.session_state[key]
 
                 st.rerun()
