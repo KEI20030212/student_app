@@ -52,13 +52,20 @@ DRAFT_PREFIXES = (
     "n_start", "n_end", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num"
 )
 
-# 🌟 新機能：再描画の直前に、画面の入力状態を無理やりsession_stateに焼き付ける関数
-def force_auto_save():
-    for k, v in st.session_state.items():
-        if any(k.startswith(p) for p in DRAFT_PREFIXES):
-            # Widgetの値は自動的にsession_stateに入っていますが、
-            # 再描画で飛ぶのを防ぐため、値を明示的に上書きして固定します
-            st.session_state[k] = v
+# ==========================================
+# 🌟 【究極の解決策】タブ増減のコールバック関数（これで絶対にデータが消えない！）
+# ==========================================
+def add_tab():
+    st.session_state['num_blocks'] = st.session_state.get('num_blocks', 1) + 1
+
+def remove_tab():
+    num_blocks = st.session_state.get('num_blocks', 1)
+    if num_blocks > 1:
+        b_to_delete = num_blocks - 1
+        for key in list(st.session_state.keys()):
+            if f"_{b_to_delete}" in key:
+                del st.session_state[key]
+        st.session_state['num_blocks'] = num_blocks - 1
 
 def render_multi_input_page():
     user_id = st.session_state.get('user_id', st.session_state.get('username', 'default_user'))
@@ -126,20 +133,11 @@ def render_multi_input_page():
 
     col_add, col_del, _ = st.columns([2, 2, 6])
     with col_add:
-        if st.button("➕ 新しいコマ（タブ）を追加", use_container_width=True):
-            force_auto_save() # 🌟 リロード直前に全入力を裏へ強制セーブ！
-            st.session_state['num_blocks'] = num_blocks + 1
-            st.rerun()
+        # 🌟 on_clickを使うことで、画面の再読み込み前に処理が走り、データが一切消えない！
+        st.button("➕ 新しいコマ（タブ）を追加", use_container_width=True, on_click=add_tab)
     with col_del:
         if num_blocks > 1:
-            if st.button("➖ 最後のタブを削除", use_container_width=True):
-                force_auto_save() # 🌟 リロード直前に全入力を裏へ強制セーブ！
-                b_to_delete = num_blocks - 1
-                for key in list(st.session_state.keys()):
-                    if f"_{b_to_delete}" in key:
-                        del st.session_state[key]
-                st.session_state['num_blocks'] = num_blocks - 1
-                st.rerun()
+            st.button("➖ 最後のタブを削除", use_container_width=True, on_click=remove_tab)
 
     tabs = st.tabs([f"📝 コマ {b+1}" for b in range(num_blocks)])
     
@@ -447,8 +445,7 @@ def render_multi_input_page():
                                             status.update(label="保存完了！", state="complete", expanded=False)
                                         st.success(f"✅ {name} の記録を保存しました！")
                                         
-                                        # 🚨 他のデータが消えないよう、リロード直前に裏保存！
-                                        force_auto_save()
+                                        # 🚨 しおりだけ挟んでおき、一番最後でお掃除する
                                         single_save_triggered = (b, i, name)
 
             st.divider()
@@ -496,8 +493,6 @@ def render_multi_input_page():
 
                     st.success(f"✅ コマ {b+1}（{actual_attendees}名）の記録を保存しました！")
                     
-                    # 🚨 他のデータが消えないよう、リロード直前に裏保存！
-                    force_auto_save()
                     all_save_triggered = (b, num_students)
 
 
