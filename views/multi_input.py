@@ -137,6 +137,9 @@ def render_multi_input_page():
         st.divider()
         cols = st.columns(num_students)
         input_data_list = []
+        
+        # 🌟 追加: 個別保存が押されたことを記憶する「しおり」
+        single_save_triggered = None 
 
         for i in range(num_students):
             with cols[i]:
@@ -440,30 +443,8 @@ def render_multi_input_page():
                                         status.update(label="保存完了！", state="complete", expanded=False)
 
                                     st.success(f"✅ {name} の記録を保存しました！")
-                                    
-                                    # 🧹 その生徒（i番目）の入力欄だけを正確に狙い撃ちしてお掃除する魔法
-                                    target_prefixes = [
-                                        "sel_student", "new_name", "att", "late", "sub", "cont", 
-                                        "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
-                                        "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
-                                        "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
-                                        "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e"
-                                    ]
-                                    for key in list(st.session_state.keys()):
-                                        for p in target_prefixes:
-                                            # 「p_0」に完全一致、または「p_0_」から始まるキーだけを削除
-                                            if key == f"{p}_{i}" or key.startswith(f"{p}_{i}_"):
-                                                del st.session_state[key]
-                                                break
-                                                
-                                    if name:
-                                        for key in list(st.session_state.keys()):
-                                            if key.startswith(f"prev_data_{name}_"):
-                                                del st.session_state[key]
-                                                
-                                    # 🚨 修正ポイント：ここにあった st.cache_data.clear() を削除しました！！
-                                    time.sleep(1.5)
-                                    st.rerun()
+                                    # 🌟 注意: ここではリセットせずに「しおり」だけ挟んでおく！
+                                    single_save_triggered = (i, name, subject)
 
         st.divider()
         if len(input_data_list) == num_students:
@@ -561,3 +542,31 @@ def render_multi_input_page():
                         del st.session_state[key]
 
                 st.rerun()
+
+        # ==========================================
+        # 🌟 最後の最後でお掃除＆再読み込みを実行（巻き添え防止の極意！）
+        # ==========================================
+        if single_save_triggered:
+            i, saved_name, saved_subject = single_save_triggered
+            
+            # 🧹 その生徒（i番目）の入力欄だけを正確に狙い撃ちしてお掃除する魔法
+            target_prefixes = [
+                "sel_student", "new_name", "att", "late", "sub", "cont", 
+                "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
+                "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
+                "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
+                "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e"
+            ]
+            for key in list(st.session_state.keys()):
+                for p in target_prefixes:
+                    if key == f"{p}_{i}" or key.startswith(f"{p}_{i}_"):
+                        del st.session_state[key]
+                        break
+                        
+            if saved_name:
+                for key in list(st.session_state.keys()):
+                    if key.startswith(f"prev_data_{saved_name}_"):
+                        del st.session_state[key]
+                        
+            time.sleep(1.5)
+            st.rerun()
