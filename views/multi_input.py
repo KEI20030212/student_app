@@ -47,19 +47,15 @@ def cached_get_quiz_master():
 DRAFT_PREFIXES = (
     "class_date", "class_type", 
     "sb_", "sel_student_", "new_name_", "att_", "late_", "sub_", "texts_", "new_usage_text_", 
-    "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_", "w_",
+    "adv_start_", "adv_end_", "num_q_", "q_name_", "q_chap_", "q_score_",
     "cont_", "done_start_", "done_end_", "conc_", "reac_", "hw_texts_", "new_hw_text_", 
     "n_start_", "n_end_", "advc_", "p_msg_", "next_h_", "d_s_", "d_e_", "n_s_", "n_e_", "hw_ranges_num_"
 )
 
 def render_multi_input_page():
-    # 🌟 ログイン中の先生のIDを取得（IDごとに保存ファイルを分けて、他の先生と混ざるのを防ぐ！）
     user_id = st.session_state.get('user_id', st.session_state.get('username', 'default_user'))
     draft_file = f"draft_{user_id}.pkl"
 
-    # ==========================================
-    # 🌟 画面を追従するサイドバー一時保存メニュー（物理ファイル版）
-    # ==========================================
     with st.sidebar:
         st.header("💾 鉄壁の一時保存メニュー")
         st.caption("アプリが落ちても、ブラウザを閉じても復元できます！")
@@ -71,14 +67,12 @@ def render_multi_input_page():
                 if k.startswith(DRAFT_PREFIXES):
                     draft[k] = v
                     
-            # 物理ファイル（Pickle）としてPC/サーバーの奥底に直接書き込む！
             with open(draft_file, "wb") as f:
                 pickle.dump(draft, f)
                 
             st.success("鉄壁保存しました！")
             
         if c2.button("📂 復元", use_container_width=True):
-            # 物理ファイルが存在するかチェックして読み込む
             if os.path.exists(draft_file):
                 with open(draft_file, "rb") as f:
                     draft = pickle.load(f)
@@ -92,7 +86,6 @@ def render_multi_input_page():
                 st.warning("保存データがありません")
                 
         if st.button("🗑️ 保存データを削除", use_container_width=True):
-            # 物理ファイルそのものを消去する
             if os.path.exists(draft_file):
                 os.remove(draft_file)
                 st.success("削除しました！")
@@ -102,7 +95,6 @@ def render_multi_input_page():
                 st.info("削除するデータがありません")
         st.divider()
 
-    # 🌟 マスターデータの一括取得
     student_df = cached_get_student_master()
     if not student_df.empty:
         student_options = (student_df['生徒ID'].astype(str) + " - " + student_df['生徒名']).tolist()
@@ -169,7 +161,7 @@ def render_multi_input_page():
                             st.warning("欠席のため、進捗・テスト入力はスキップされます。")
                             input_data_list.append({
                                 "student_id" : student_id, "name": name, "subject": "-", "text_name": "-", "advanced_p": "-", 
-                                "quiz_records": [], "w_nums_for_sheet": "", "attendance": attendance,
+                                "quiz_records": [], "attendance": attendance,
                                 "late_time": late_time, "concentration": "-", "reaction": "-",
                                 "advice": "-", "parent_msg": "-", "next_handover": "-",
                                 "assigned_p": 0, "completed_p": 0, "motivation_rank": 0, 
@@ -207,7 +199,6 @@ def render_multi_input_page():
                                     f"💬 **引継ぎメモ:**\n{last_note}"
                                 )
                                 
-                                # 🤖 複数テキスト・複数範囲を全自動パース
                                 assigned_p = 0
                                 assigned_hw_list = []
                                 if str(last_hw_pages).strip() and str(last_hw_pages).strip() != "-":
@@ -292,7 +283,6 @@ def render_multi_input_page():
                                 
                                 num_quizzes = st.number_input("💯 小テスト実施回数", min_value=0, max_value=5, value=0, step=1, key=f"num_q_{i}")
                                 quiz_records = []
-                                w_nums_for_sheet_list = []
                                 current_quiz_pts = 0 
                                 
                                 if num_quizzes > 0:
@@ -307,17 +297,11 @@ def render_multi_input_page():
                                             with col_q2:
                                                 score = st.number_input(f"点数", min_value=0, max_value=100, value=100, step=1, key=f"q_score_{i}_{q_idx}")
                                             
-                                            w_nums = st.text_input(f"ミス問題番号 (任意)", key=f"w_{i}_{q_idx}")
-                                            
                                             quiz_records.append({
                                                 "quiz_name": q_name or "不明", "unit": target_chap, "score": score
                                             })
-                                            if w_nums:
-                                                w_nums_for_sheet_list.append(w_nums)
                                             current_quiz_pts += calculate_quiz_points(score, q_name, quiz_details)
                                 
-                                w_nums_for_sheet = ",".join(w_nums_for_sheet_list)
-
                                 today_hw_rate = calculate_hw_rate(assigned_p, completed_p)
                                 motivation_rank = calculate_motivation_rank(today_hw_rate, current_quiz_pts, 0)
 
@@ -382,7 +366,7 @@ def render_multi_input_page():
                                 input_data_list.append({
                                     "student_id": student_id, "name": name, "subject": subject, "text_name": text_name_str,
                                     "advanced_p": advanced_p_str, "quiz_records": quiz_records, 
-                                    "w_nums_for_sheet": w_nums_for_sheet, "attendance": attendance,
+                                    "attendance": attendance,
                                     "late_time": late_time, "concentration": concentration or "-", "reaction": reaction or "-",
                                     "advice": advice, "parent_msg": parent_msg, "next_handover": next_handover,
                                     "assigned_p": assigned_p, "completed_p": completed_p, "advanced_p_str": advanced_p_str,
@@ -390,6 +374,76 @@ def render_multi_input_page():
                                     "next_hw_text": selected_hw_text_str, 
                                     "next_hw_pages": next_hw_pages_str
                                 })
+
+                                # ==========================================
+                                # 🌟 【新機能】この生徒だけの記録を個別に保存するボタン！
+                                # ==========================================
+                                st.divider()
+                                if st.button(f"👤 {name} の記録だけを個別に保存", key=f"save_single_{i}", use_container_width=True):
+                                    with st.status(f"{name} のデータを保存中...", expanded=True) as status:
+                                        
+                                        robust_api_call(
+                                            save_to_spreadsheet,
+                                            student_id=student_id,
+                                            name=name,
+                                            subject=subject,
+                                            text_name=text_name_str,
+                                            advanced_p=advanced_p_str,
+                                            quiz_records=[],
+                                            date=date, 
+                                            teacher_name=teacher_name,
+                                            class_type=class_type,  
+                                            attendance=attendance,
+                                            class_slot=class_slot,
+                                            advice=advice,
+                                            parent_msg=parent_msg,
+                                            next_handover=next_handover,
+                                            assigned_p=assigned_p,
+                                            completed_p=completed_p, 
+                                            motivation_rank=motivation_rank,
+                                            next_hw_text=selected_hw_text_str,
+                                            next_hw_pages=next_hw_pages_str,
+                                            late_time=late_time,        
+                                            concentration=concentration or "-",
+                                            reaction=reaction or "-"            
+                                        )
+
+                                        if quiz_records and len(quiz_records) > 0:
+                                            for q in quiz_records:
+                                                robust_api_call(
+                                                    save_quiz_to_dedicated_sheet,
+                                                    date_str=date.strftime("%Y/%m/%d"),
+                                                    student_name=name,
+                                                    text_name=q["quiz_name"],
+                                                    chapter=q["unit"],
+                                                    score=q["score"],
+                                                    w_nums="", 
+                                                    mode="授業内"
+                                                )
+                                        
+                                        if attendance != "欠席（振替なし）" and "欠席" not in attendance:
+                                            try:
+                                                robust_api_call(
+                                                    update_student_homework_rate,
+                                                    name, subject, assigned_p, completed_p
+                                                )
+                                            except Exception:
+                                                pass 
+                                            
+                                        status.update(label="保存完了！", state="complete", expanded=False)
+
+                                    st.success(f"✅ {name} の記録を保存しました！")
+                                    
+                                    # 🧹 個別の入力欄だけをきれいにお掃除する魔法
+                                    for key in list(st.session_state.keys()):
+                                        if key.endswith(f"_{i}") or f"_{i}_" in key:
+                                            del st.session_state[key]
+                                    if f"prev_data_{name}_{subject}" in st.session_state:
+                                        del st.session_state[f"prev_data_{name}_{subject}"]
+                                        
+                                    st.cache_data.clear()
+                                    time.sleep(1.5)
+                                    st.rerun()
 
         st.divider()
         if len(input_data_list) == num_students:
@@ -400,14 +454,15 @@ def render_multi_input_page():
             if actual_attendees < num_students and actual_attendees > 0:
                 st.info(f"💡 欠席者がいるため、実際の授業形態は「{actual_class_type}」として記録されます。")
 
+            # ==========================================
+            # 🌟 従来通り：全員の記録をまとめて保存するボタン
+            # ==========================================
             if st.button("🚀 全員の記録をまとめて保存する", type="primary", use_container_width=True):
                 with st.status("データを保存中...", expanded=True) as status:
                     for data in input_data_list:
-                        # 🌟 新機能: 欠席の生徒は保存処理を完全にスキップする！
                         if "欠席" in data.get("attendance", ""):
                             continue
 
-                        # 1. 授業記録を保存
                         robust_api_call(
                             save_to_spreadsheet,
                             student_id=data.get("student_id", ""),
@@ -434,7 +489,6 @@ def render_multi_input_page():
                             reaction=data.get("reaction", "")            
                         )
 
-                        # 2. 小テストの専用シート保存
                         if data.get("quiz_records") and len(data["quiz_records"]) > 0:
                             for q in data["quiz_records"]:
                                 robust_api_call(
@@ -444,11 +498,10 @@ def render_multi_input_page():
                                     text_name=q["quiz_name"],
                                     chapter=q["unit"],
                                     score=q["score"],
-                                    w_nums=data["w_nums_for_sheet"],
+                                    w_nums="", 
                                     mode="授業内"
                                 )
                         
-                        # 宿題実施率の更新（欠席でなければ実行。上でcontinueしているので念のためのガード）
                         if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"]:
                             try:
                                 robust_api_call(
@@ -472,7 +525,6 @@ def render_multi_input_page():
                     del st.session_state["sb_class_slot"]
 
                 for i in range(num_students):
-                    # 固定のキーのクリア
                     keys_to_reset = [
                         f"name_{i}", f"att_{i}", f"late_{i}", f"sub_{i}", f"texts_{i}", 
                         f"cont_{i}", "done_start_{i}", f"done_end_{i}", 
@@ -484,9 +536,8 @@ def render_multi_input_page():
                         if k in st.session_state:
                             del st.session_state[k]
 
-                # 動的に作られたキー（d_s, n_e など）を一斉にお掃除
                 for key in list(st.session_state.keys()):
-                    if key.startswith("prev_data_") or key.startswith("d_s_") or key.startswith("d_e_") or key.startswith("n_s_") or key.startswith("n_e_") or key.startswith("hw_ranges_num_") or key.startswith("adv_start_") or key.startswith("adv_end_") or key.startswith("q_name_") or key.startswith("q_chap_") or key.startswith("q_score_") or key.startswith("w_"):
+                    if key.startswith("prev_data_") or key.startswith("d_s_") or key.startswith("d_e_") or key.startswith("n_s_") or key.startswith("n_e_") or key.startswith("hw_ranges_num_") or key.startswith("adv_start_") or key.startswith("adv_end_") or key.startswith("q_name_") or key.startswith("q_chap_") or key.startswith("q_score_"):
                         del st.session_state[key]
 
                 st.rerun()
