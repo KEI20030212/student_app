@@ -652,7 +652,7 @@ def save_self_study_record(date, name, start_time, end_time, break_time, actual_
 
 def add_new_textbook(new_name):
     """
-    アプリから新規テキストを登録し、自動で五十音順（A列基準）に並べ替える魔法！
+    アプリから新規テキストを登録し、自動で五十音順（A列基準）に全列を並べ替える魔法！
     """
     import streamlit as st
     gc = get_gc_client()
@@ -660,13 +660,12 @@ def add_new_textbook(new_name):
         sh = gc.open_by_key(SPREADSHEET_ID)
         worksheet = sh.worksheet("テキスト情報一覧")
         
-        # 先生のシートは「テキスト」と「章」の2列構成なので、
-        # 新規登録時はとりあえず章に「-」を入れて追加します
-        worksheet.append_row([new_name, "-"])
+        # 🌟 5列構成（テキスト, 章, 単元名, 開始ページ, 終了ページ）に合わせて追加
+        worksheet.append_row([new_name, "-", "-", "-", "-"])
         
         # 🌟 ここが自動並べ替えの魔法！
-        # 1行目（ヘッダー）は残したまま、2行目以降を1列目（テキスト名）の昇順でソートします
-        worksheet.sort((1, 'asc'), range='A2:B1000')
+        # 1行目（ヘッダー）は残したまま、A列〜E列（5列目）までを1列目（テキスト名）の昇順でまとめてソートします
+        worksheet.sort((1, 'asc'), range='A2:E1000')
         return True
     except Exception as e:
         st.error(f"🚨 新規テキストの裏側でエラー発生: {e}")
