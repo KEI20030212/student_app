@@ -34,7 +34,7 @@ def render_edit_input_page():
     # 2. 該当する記録をプルダウンの選択肢にする
     options = []
     for idx, row in df_filtered.iterrows():
-        opt_label = f"{row.get('生徒名', '不明')} - {row.get('科目', '不明')} ({row.get('授業コマ', '不明')})"
+        opt_label = f"{row.get('名前', '不明')} - {row.get('科目', '不明')} ({row.get('授業コマ', '不明')})"
         options.append((idx, opt_label))
 
     selected_opt = col2.selectbox("📝 修正する記録を選択", options, format_func=lambda x: x[1])
@@ -45,7 +45,7 @@ def render_edit_input_page():
         record = df_filtered.loc[idx]
 
         st.divider()
-        st.write(f"### ✍️ {record.get('生徒名')} さんの記録を修正")
+        st.write(f"### ✍️ {record.get('名前')} さんの記録を修正")
 
         with st.form("edit_record_form"):
             c1, c2, c3 = st.columns(3)
