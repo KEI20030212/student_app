@@ -66,8 +66,8 @@ def render_edit_input_page():
                 new_used_text = st.text_area("📘 今回使用したテキスト", value=str(record.get('テキスト', '')), height=68)
                 new_adv = st.text_area("📖 授業進捗 (P.〇〜〇)", value=str(record.get('終了ページ', '')), height=68)
             with c_txt2:
-                new_hw_text = st.text_area("📘 次回の宿題テキスト", value=str(record.get('次回の宿題', '')), height=68)
-                new_hw = st.text_area("🚀 次回の宿題範囲 (P.〇〜〇)", value=str(record.get('次回の宿題範囲', '')), height=68)
+                new_hw_text = st.text_area("📘 次回の宿題テキスト", value=str(record.get('次回の宿題テキスト', '')), height=68)
+                new_hw = st.text_area("🚀 次回の宿題範囲 (P.〇〜〇)", value=str(record.get('次回の宿題ページ数', '')), height=68)
 
             st.write("🧠 **授業中の様子・評価**")
             c_eval1, c_eval2 = st.columns(2)
@@ -95,8 +95,8 @@ def render_edit_input_page():
                         "遅刻時間": new_late,
                         "テキスト": new_used_text,
                         "終了ページ": new_adv,
-                        "次回の宿題": new_hw_text,
-                        "次回の宿題範囲": new_hw,
+                        "次回の宿題テキスト": new_hw_text,
+                        "次回の宿題ページ数": new_hw,
                         "集中力": new_conc,
                         "ミスへの反応": new_reac,
                         "授業アドバイス": new_advc,
