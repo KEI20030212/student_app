@@ -321,7 +321,7 @@ def render_multi_input_page():
                                         for q_idx in range(num_quizzes):
                                             with st.container(border=True):
                                                 st.write(f"**【小テスト {q_idx + 1}】**")
-                                                q_name = st.selectbox(f"テストの種類", quiz_names, index=None, placeholder="小テストを選択", key=f"q_name_{b}_{i}_{q_idx}")
+                                                q_name = st.selectbox(f"テスト名", quiz_names, index=None, placeholder="小テストを選択", key=f"q_name_{b}_{i}_{q_idx}")
                                                 
                                                 current_max = 100
                                                 if q_name and q_name in quiz_details:
