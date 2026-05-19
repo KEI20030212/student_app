@@ -953,7 +953,7 @@ def load_self_study_data():
 #quiz_dashboard.py
 def get_quiz_master_dict():
     """
-    「設定_小テスト一覧」シートから、テスト名ごとの満点・用紙サイズを取得する
+    「設定_小テスト一覧」シートから、テスト名と満点・用紙サイズの対応表を取得する
     """
     try:
         gc = get_gc_client()
@@ -965,20 +965,28 @@ def get_quiz_master_dict():
         
         for row in all_records[1:]:
             if len(row) >= 3:
-                # 🌟 キーを「テスト名」のみに変更！
-                quiz_name = row[0] 
+                # 記録シート側の quiz_name と合わせるため「テキスト_単元」をキーにする
+                quiz_key = f"{row[0]}_{row[1]}"
                 
+                # C列（満点）の取得
                 try:
                     full_marks = float(row[2])
                 except ValueError:
-                    full_marks = 100
+                    full_marks = 100 # 数字でない場合はデフォルト100点
                     
-                paper_size = row[3].strip() if len(row) >= 4 and row[3].strip() != "" else "A4"
+                # 🌟 【ここを追加！】D列（用紙サイズ）の取得
+                # 行のデータが4つ以上ある ＆ 空欄じゃない場合はそのサイズを使い、それ以外は「A4」にする安全策
+                if len(row) >= 4 and row[3].strip() != "":
+                    paper_size = row[3].strip()
+                else:
+                    paper_size = "A4"
                 
-                master_dict[quiz_name] = {
+                # 🌟 【ここを変更！】辞書の中に "サイズ" も一緒に保存する
+                master_dict[quiz_key] = {
                     "full_marks": full_marks,
                     "サイズ": paper_size
                 }
+                
         return master_dict
     except Exception as e:
         print(f"小テスト設定の読み込みエラー: {e}")
