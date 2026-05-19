@@ -830,7 +830,7 @@ def update_lesson_record_in_sheet(date_str, student_name, class_slot, new_data):
             row_dict = dict(zip(header, row))
             
             # 日付、生徒名、コマが完全一致する行を探す
-            if str(row_dict.get('日時', '')).startswith(date_str) and row_dict.get('生徒名') == student_name and row_dict.get('授業コマ') == class_slot:
+            if str(row_dict.get('日時', '')).startswith(date_str) and row_dict.get('名前') == student_name and row_dict.get('授業コマ') == class_slot:
                 target_row_idx = i + 1 # gspreadは1始まりのため
                 existing_row = row
                 break
