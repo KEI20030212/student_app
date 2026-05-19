@@ -806,6 +806,53 @@ def _update_student_master_row(student_name, hw_rate, motivation_rank):
     except Exception as e:
         print(f"生徒マスター更新エラー: {e}")
 
+#edit_input.py
+def update_lesson_record_in_sheet(date_str, student_name, class_slot, new_data):
+    """
+    【修正用】指定された「日付・生徒名・授業コマ」に一致する行を探し出し、新しいデータで上書きする関数
+    """
+    import gspread
+    gc = get_gc_client()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("授業ログ統合") 
+        
+        all_values = ws.get_all_values()
+        if not all_values:
+            return False
+            
+        header = all_values[0]
+
+        target_row_idx = -1
+        # 一致する行を検索
+        for i, row in enumerate(all_values):
+            if i == 0: continue
+            row_dict = dict(zip(header, row))
+            
+            # 日付、生徒名、コマが完全一致する行を探す
+            if str(row_dict.get('日時', '')).startswith(date_str) and row_dict.get('生徒名') == student_name and row_dict.get('授業コマ') == class_slot:
+                target_row_idx = i + 1 # gspreadは1始まりのため
+                existing_row = row
+                break
+
+        if target_row_idx == -1:
+            return False # 見つからなかった
+
+        # 新しいデータで既存の行を書き換え
+        for col_name, new_val in new_data.items():
+            if col_name in header:
+                col_idx = header.index(col_name)
+                existing_row[col_idx] = str(new_val)
+
+        # A列から最後の列まで、その1行だけをガバッと上書き！
+        range_label = f"A{target_row_idx}:{gspread.utils.rowcol_to_a1(target_row_idx, len(header))}"
+        ws.update(range_name=range_label, values=[existing_row])
+        return True
+        
+    except Exception as e:
+        print(f"修正上書き中にエラー発生: {e}")
+        return False
+
 #dashboard.py
 def load_quiz_records():
     """
