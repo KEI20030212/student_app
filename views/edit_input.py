@@ -11,7 +11,6 @@ def render_edit_input_page():
     col1, col2 = st.columns(2)
     target_date = col1.date_input("📅 修正したい授業の日付", datetime.date.today())
 
-    # 1. 指定された日付の記録を検索
     with st.spinner("記録を検索中..."):
         df_logs = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -19,7 +18,6 @@ def render_edit_input_page():
         st.warning("データが取得できませんでした。")
         return
 
-    # 日付で絞り込み (文字列の前方一致)
     date_str = target_date.strftime("%Y/%m/%d")
     if '日時' in df_logs.columns:
         df_filtered = df_logs[df_logs['日時'].astype(str).str.contains(date_str, na=False)]
@@ -31,7 +29,6 @@ def render_edit_input_page():
         st.warning(f"{date_str} の授業記録は見つかりませんでした。")
         return
 
-    # 2. 該当する記録をプルダウンの選択肢にする
     options = []
     for idx, row in df_filtered.iterrows():
         opt_label = f"{row.get('名前', '不明')} - {row.get('科目', '不明')} ({row.get('授業コマ', '不明')})"
@@ -39,7 +36,6 @@ def render_edit_input_page():
 
     selected_opt = col2.selectbox("📝 修正する記録を選択", options, format_func=lambda x: x[1])
 
-    # 3. 選択された記録の編集フォームを表示
     if selected_opt:
         idx = selected_opt[0]
         record = df_filtered.loc[idx]
@@ -63,8 +59,15 @@ def render_edit_input_page():
 
             st.write("📚 **授業進捗・宿題（直接テキストを編集できます）**")
             st.caption("※複雑なページ数も、ここのテキストを直接書き換えるだけで簡単に修正・上書きが可能です。")
-            new_adv = st.text_area("📖 授業進捗", value=str(record.get('進捗', '')))
-            new_hw = st.text_area("🚀 次回の宿題範囲", value=str(record.get('次回の宿題範囲', '')))
+            
+            # 🌟 スプレッドシートの実際の列名（テキスト、終了ページ、次回の宿題、次回の宿題範囲）に合わせて呼び出し
+            c_txt1, c_txt2 = st.columns(2)
+            with c_txt1:
+                new_used_text = st.text_area("📘 今回使用したテキスト", value=str(record.get('テキスト', '')), height=68)
+                new_adv = st.text_area("📖 授業進捗 (P.〇〜〇)", value=str(record.get('終了ページ', '')), height=68)
+            with c_txt2:
+                new_hw_text = st.text_area("📘 次回の宿題テキスト", value=str(record.get('次回の宿題', '')), height=68)
+                new_hw = st.text_area("🚀 次回の宿題範囲 (P.〇〜〇)", value=str(record.get('次回の宿題範囲', '')), height=68)
 
             st.write("🧠 **授業中の様子・評価**")
             c_eval1, c_eval2 = st.columns(2)
@@ -77,21 +80,22 @@ def render_edit_input_page():
             new_reac = c_eval2.selectbox("ミスへの反応", reac_opts, index=reac_opts.index(current_reac) if current_reac in reac_opts else 0)
 
             st.write("💬 **コメント事項**")
-            # スプレッドシートの列名に合わせて取得
-            new_advc = st.text_area("🗣️ 授業でのアドバイス", value=str(record.get('授業アドバイス', '')))
-            new_pmsg = st.text_area("👪 保護者への連絡事項", value=str(record.get('保護者への連絡', '')))
-            new_next_h = st.text_area("🔄 次回への引継ぎ事項", value=str(record.get('次回への引継ぎ', '')))
+            new_advc = st.text_area("🗣️ 授業でのアドバイス", value=str(record.get('授業アドバイス', '')), height=100)
+            new_pmsg = st.text_area("👪 保護者への連絡事項", value=str(record.get('保護者への連絡', '')), height=100)
+            new_next_h = st.text_area("🔄 次回への引継ぎ事項", value=str(record.get('次回への引継ぎ', '')), height=100)
 
             submitted = st.form_submit_button("💾 修正を上書き保存する", type="primary", use_container_width=True)
 
             if submitted:
                 with st.spinner("データを上書き保存中..."):
-                    # 上書きするデータの辞書を作成
+                    # 🌟 保存時の列名もスプレッドシートに合わせる
                     update_data = {
                         "出欠": new_att,
                         "科目": new_sub,
                         "遅刻時間": new_late,
-                        "進捗": new_adv,
+                        "テキスト": new_used_text,
+                        "終了ページ": new_adv,
+                        "次回の宿題": new_hw_text,
                         "次回の宿題範囲": new_hw,
                         "集中力": new_conc,
                         "ミスへの反応": new_reac,
@@ -103,7 +107,7 @@ def render_edit_input_page():
                     success = robust_api_call(
                         update_lesson_record_in_sheet,
                         date_str=date_str,
-                        student_name=record.get('生徒名'),
+                        student_name=record.get('名前'),
                         class_slot=record.get('授業コマ'),
                         new_data=update_data,
                         fallback_value=False
