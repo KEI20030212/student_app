@@ -70,8 +70,8 @@ def render_student_details_page(selected_student_option):
             st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
             st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
             st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
-            # 🌟 追加：契約コースの表示
             st.markdown(f"**📋 契約コース**: {info.get('契約コース', '') or '未設定'}")
+            st.markdown(f"**🎯 生徒タイプ**: {info.get('タイプ', '') or '未設定'}")
             
             if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
                 with st.expander("✏️ 基本情報を編集する (教室長のみ)"):
@@ -108,6 +108,10 @@ def render_student_details_page(selected_student_option):
                         b_val = cc1.number_input("Bコース", min_value=0, value=b_default, step=1)
                         q_val = cc2.number_input("Qコース", min_value=0, value=q_default, step=1)
                         
+                        type_opts = ["", "充実", "訓練", "実用", "関係", "自尊", "報酬"]
+                        current_type = str(info.get('タイプ', '')).replace('未設定', '')
+                        type_idx = type_opts.index(current_type) if current_type in type_opts else 0
+                        new_type = st.selectbox("🎯 生徒タイプ", type_opts, index=type_idx)
                         if st.form_submit_button("💾 基本情報を保存", type="primary"):
                             
                             # 🌟 追加：入力された数字をスプレッドシート保存用の文字列に再結合
@@ -134,7 +138,8 @@ def render_student_details_page(selected_student_option):
                                         info.get('宿題履行率', 100),
                                         new_exam,        
                                         new_school_type,
-                                        new_contract_str # 🌟 追加：結合した契約コースの文字列を渡す
+                                        new_contract_str,
+                                        new_type
                                     )
                                     return True
                                 
