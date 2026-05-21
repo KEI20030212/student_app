@@ -76,11 +76,12 @@ def render_quiz_list_page():
                 target_quiz = col1.selectbox("📝 小テスト名", quiz_names)
                 target_unit = col2.number_input("📖 単元・回", min_value=1, value=1, step=1)
                 
+                # 🌟 【アップデート】選んだテスト名を元に満点を自動取得
                 max_score = 100
-                for k, v in quiz_details.items():
-                    if k.startswith(f"{target_quiz}_"):
-                        max_score = int(v.get("full_marks", 100))
-                        break
+                if target_quiz:
+                    matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{target_quiz}_")]
+                    if matched_marks:
+                        max_score = int(pd.Series(matched_marks).mode()[0])
                 
                 col3, col4 = st.columns(2)
                 score = col3.number_input(f"💯 点数 (満点: {max_score})", min_value=0, max_value=max_score, value=max_score, step=1)
@@ -120,8 +121,6 @@ def render_quiz_list_page():
     # ==========================================
     with st.spinner("習熟度データを集計中..."):
         df_all_quizzes = cached_load_all_quizzes()
-        
-        # 🌟 ここで単元名マスタも取得しておく
         textbook_master = cached_get_textbook_master()
         
         if "APIエラー発生" in df_all_quizzes.columns:
@@ -175,31 +174,27 @@ def render_quiz_list_page():
 
                 pivot_df = pivot_df[sorted(pivot_df.columns.tolist(), key=sort_key)]
 
-                # 🌟 【新機能】列の数字を「数字: 単元名」に自動変換！
                 col_mapping = {}
-                t_master = textbook_master.get(q_name, {}) # 対象のテキストの単元リストを取得
+                t_master = textbook_master.get(q_name, {}) 
                 
                 for col in pivot_df.columns:
                     chap_str = str(col)
                     chap_name = t_master.get(chap_str, "")
                     if chap_name:
-                        # 単元名があれば合体させる
                         col_mapping[col] = f"{chap_str}: {chap_name}"
                     else:
-                        # なければ「第○回」とだけ表示
                         col_mapping[col] = f"第{chap_str}回"
                         
-                # 列名を一括リネーム
                 pivot_df = pivot_df.rename(columns=col_mapping)
 
                 def add_icon(val):
                     if pd.isna(val) or val == "": return ""
                     
+                    # 🌟 【アップデート】アイコン表示用の満点取得も新ロジックに対応
                     full_m = 100
-                    for k, v in quiz_details.items():
-                        if k.startswith(f"{q_name}_"):
-                            full_m = float(v.get("full_marks", 100))
-                            break
+                    matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{q_name}_")]
+                    if matched_marks:
+                        full_m = int(pd.Series(matched_marks).mode()[0])
                             
                     try:
                         v = float(val)

@@ -323,11 +323,20 @@ def render_multi_input_page():
                                                 st.write(f"**【小テスト {q_idx + 1}】**")
                                                 q_name = st.selectbox(f"テストの種類", quiz_names, index=None, placeholder="小テストを選択", key=f"q_name_{b}_{i}_{q_idx}")
                                                 
+                                                current_max = 100 # デフォルトは100
+                                                if q_name:
+                                                    # quiz_detailsのキー（k）が、選んだテスト名（q_name）＋"_"で始まるものを探す
+                                                    matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{q_name}_")]
+                                                    if matched_marks:
+                                                        # そのテストの満点データリストから、一番よく出てくる点数（最頻値）を採用する
+                                                        current_max = int(pd.Series(matched_marks).mode()[0])
+
                                                 col_q1, col_q2 = st.columns(2)
                                                 with col_q1:
                                                     target_chap = st.number_input(f"実施した単元/回", min_value=1, value=1, step=1, key=f"q_chap_{b}_{i}_{q_idx}")
                                                 with col_q2:
-                                                    score = st.number_input(f"点数", min_value=0, max_value=100, value=100, step=1, key=f"q_score_{b}_{i}_{q_idx}")
+                                                    # 🌟 検索して見つけ出した満点をセット！
+                                                    score = st.number_input(f"点数 (/{current_max}点満点)", min_value=0, max_value=current_max, value=current_max, step=1, key=f"q_score_{b}_{i}_{q_idx}")
                                                 
                                                 w_nums = st.text_input(f"ミス問題番号 (任意)", key=f"w_{b}_{i}_{q_idx}")
                                                 
