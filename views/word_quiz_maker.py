@@ -36,7 +36,7 @@ def render_word_quiz_maker_page():
 
     # --- メイン設定 ---
     # 🌟 修正1：選択肢を「キクタン」の4つに限定
-    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問", "WordCup20問", "WordCup100問"]
+    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問", "WordCup20問", "WordCup100問", "WordCup200問"]
     
     # 登録されている中から、対象の4つだけを表示（登録がない場合は警告）
     available_options = [opt for opt in target_options if opt in quiz_dict]
@@ -53,23 +53,26 @@ def render_word_quiz_maker_page():
     with st.container(border=True):
         st.markdown(f"#### ⚙️ 「{quiz_name}」の設定を適用中")
         
-        portrait_val = "true"
-        # 選択された名前に基づいて範囲とサイズを自動決定
+        portrait_val = "true"  # デフォルトは縦向き
+        
         if quiz_name == "キクタン8問":
-            q_range, a_range, p_size = "A1:I18", "J1:R18", "B5"
+            ranges, p_size = ["A1:I18", "J1:R18"], "B5"
         elif quiz_name == "キクタン16問":
-            q_range, a_range, p_size = "A1:I18", "J1:R18", "B5"
+            ranges, p_size = ["A1:I18", "J1:R18"], "B5"
         elif quiz_name == "WordCup20問":
-            q_range, a_range, p_size = "A1:I23", "J1:R23", "B5"    
+            ranges, p_size = ["A1:I23", "J1:R23"], "B5"    
         elif quiz_name == "キクタン32問":
-            q_range, a_range, p_size = "A1:M18", "N1:Z18", "A4"
+            ranges, p_size = ["A1:J18", "M1:V18"], "A4"
         elif quiz_name == "WordCup100問":
-            q_range, a_range, p_size = "A1:AB27", "AC1:BD27", "A3"
+            ranges, p_size = ["A1:AB27", "AC1:BD27"], "A3"
+            portrait_val = "false"
+        elif quiz_name == "WordCup200問":
+            ranges, p_size = ["A1:AB27", "A29:AB55", "AC1:BD27", "AC29:BD55"], "A3"
             portrait_val = "false"  
         else: # キクタン50問
-            q_range, a_range, p_size = "A1:N27", "O1:AB27", "A3"
+            ranges, p_size = ["A1:N27", "O1:AB27"], "A3"
 
-        st.caption(f"自動設定：範囲 {q_range} / 用紙 {p_size}")
+        st.caption(f"自動設定：範囲 {ranges} / 用紙 {p_size}")
 
         # 範囲指定（ここは手動で調整が必要なため残しています）
         target_sheet_name = "確認テスト"
@@ -103,7 +106,7 @@ def render_word_quiz_maker_page():
                         
                     time.sleep(3) 
 
-                    # PDF URL作成
+                    # PDF URL作成（ベース部分）
                     base_url = (
                         f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
                         f"?format=pdf&gid={gid}&size={p_size}&portrait={portrait_val}"
@@ -111,30 +114,35 @@ def render_word_quiz_maker_page():
                         f"&top_margin=0.2&bottom_margin=0.2&left_margin=0.2&right_margin=0.2"
                         f"&horizontal_alignment=CENTER&fzr=false&fzc=false"
                     )
-                    url_q = f"{base_url}&range={q_range}"
-                    url_a = f"{base_url}&range={a_range}"
 
-                    # 4. ダウンロード処理
+                    # 4. ダウンロード＆結合処理
                     import requests
                     import google.auth.transport.requests
                     from google.oauth2.service_account import Credentials
+                    
                     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
                     secret_dict = json.loads(st.secrets["gcp_service_account_json"])
                     creds = Credentials.from_service_account_info(secret_dict, scopes=scopes)
                     creds.refresh(google.auth.transport.requests.Request())
                     headers = {"Authorization": f"Bearer {creds.token}"}
                     
-                    res_q = robust_api_call(requests.get, url_q, headers=headers, fallback_value=None)
-                    res_a = robust_api_call(requests.get, url_a, headers=headers, fallback_value=None)
-                    
-                    if res_q is None or res_a is None or res_q.status_code != 200 or res_a.status_code != 200:
-                        st.error("PDFファイルの取得に失敗しました。")
-                        st.stop()
-                    
                     merger = PdfWriter()
-                    merger.append(io.BytesIO(res_q.content))
-                    merger.append(io.BytesIO(res_a.content))
                     
+                    # 🌟 魔法のループ処理：rangesに入っている範囲の数だけ自動で繰り返す！
+                    for r in ranges:
+                        # 範囲ごとにURLを作ってダウンロード
+                        url = f"{base_url}&range={r}"
+                        res = robust_api_call(requests.get, url, headers=headers, fallback_value=None)
+                        
+                        # もし失敗したらエラーを出してストップ
+                        if res is None or res.status_code != 200:
+                            st.error(f"PDFの取得に失敗しました。（範囲: {r}）")
+                            st.stop()
+                        
+                        # 成功したらPDFの束に追加（結合）していく
+                        merger.append(io.BytesIO(res.content))
+                    
+                    # 🌟 すべて結合し終わったらデータとして保存
                     merged_stream = io.BytesIO()
                     merger.write(merged_stream)
                     
