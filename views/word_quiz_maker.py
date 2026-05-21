@@ -36,7 +36,7 @@ def render_word_quiz_maker_page():
 
     # --- メイン設定 ---
     # 🌟 修正1：選択肢を「キクタン」の4つに限定
-    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問"]
+    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問", "WordCup20問", "WordCup100問"]
     
     # 登録されている中から、対象の4つだけを表示（登録がない場合は警告）
     available_options = [opt for opt in target_options if opt in quiz_dict]
@@ -53,13 +53,19 @@ def render_word_quiz_maker_page():
     with st.container(border=True):
         st.markdown(f"#### ⚙️ 「{quiz_name}」の設定を適用中")
         
+        portrait_val = "true"
         # 選択された名前に基づいて範囲とサイズを自動決定
         if quiz_name == "キクタン8問":
             q_range, a_range, p_size = "A1:I18", "J1:R18", "B5"
         elif quiz_name == "キクタン16問":
             q_range, a_range, p_size = "A1:I18", "J1:R18", "B5"
+        elif quiz_name == "WordCup20問":
+            q_range, a_range, p_size = "A1:I23", "J1:R23", "B5"    
         elif quiz_name == "キクタン32問":
             q_range, a_range, p_size = "A1:M18", "N1:Z18", "A4"
+        elif quiz_name == "WordCup100問":
+            q_range, a_range, p_size = "A1:AB27", "AC1:BD27", "A3"
+            portrait_val = "false"  
         else: # キクタン50問
             q_range, a_range, p_size = "A1:N27", "O1:AB27", "A3"
 
@@ -100,7 +106,7 @@ def render_word_quiz_maker_page():
                     # PDF URL作成
                     base_url = (
                         f"https://docs.google.com/spreadsheets/d/{sheet_id}/export"
-                        f"?format=pdf&gid={gid}&size={p_size}&portrait=true"
+                        f"?format=pdf&gid={gid}&size={p_size}&portrait={portrait_val}"
                         f"&gridlines=false&scale=3&fitw=true"
                         f"&top_margin=0.2&bottom_margin=0.2&left_margin=0.2&right_margin=0.2"
                         f"&horizontal_alignment=CENTER&fzr=false&fzc=false"
