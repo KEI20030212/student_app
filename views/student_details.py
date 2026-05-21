@@ -67,11 +67,16 @@ def render_student_details_page(selected_student_option):
             if disp_school:
                 st.markdown(f"**🏫 学校区分**: {disp_school}")
             
+            disp_types = info.get('タイプ', '')
+            if disp_types:
+                st.markdown(f"**🎯 生徒タイプ**: {disp_types.replace('、', ' / ')}")
+            else:
+                st.markdown("**🎯 生徒タイプ**: 未設定")
+            
             st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
             st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
             st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
             st.markdown(f"**📋 契約コース**: {info.get('契約コース', '') or '未設定'}")
-            st.markdown(f"**🎯 生徒タイプ**: {info.get('タイプ', '') or '未設定'}")
             
             if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
                 with st.expander("✏️ 基本情報を編集する (教室長のみ)"):
@@ -106,22 +111,24 @@ def render_student_details_page(selected_student_option):
                         
                         cc1, cc2 = st.columns(2)
                         b_val = cc1.number_input("Bコース", min_value=0, value=b_default, step=1)
-                        q_val = cc2.number_input("Qコース", min_value=0, value=q_default, step=1)
-                        
-                        type_opts = ["", "充実", "訓練", "実用", "関係", "自尊", "報酬"]
-                        current_type = str(info.get('タイプ', '')).replace('未設定', '')
-                        type_idx = type_opts.index(current_type) if current_type in type_opts else 0
-                        new_type = st.selectbox("🎯 生徒タイプ", type_opts, index=type_idx)
-                        if st.form_submit_button("💾 基本情報を保存", type="primary"):
+                        q_val = cc2.number_input("Qコース", min_value=0, value=q_default, step=1)                    
+                        course_parts = []
+                        if b_val and b_val > 0:
+                            course_parts.append(f"Bコース:{b_val}")
+                        if q_val and q_val > 0:
+                            course_parts.append(f"Qコース:{q_val}")
+                        new_contract_str = "、".join(course_parts)
                             
-                            # 🌟 追加：入力された数字をスプレッドシート保存用の文字列に再結合
-                            course_parts = []
-                            if b_val and b_val > 0:
-                                course_parts.append(f"Bコース:{b_val}")
-                            if q_val and q_val > 0:
-                                course_parts.append(f"Qコース:{q_val}")
-                            new_contract_str = "、".join(course_parts)
+                        type_opts = ["充実", "訓練", "実用", "関係", "自尊", "報酬"]
 
+                        current_types = str(info.get('タイプ', '')).replace('未設定', '').split('、')
+                        current_types = [t for t in current_types if t in type_opts] # 空文字などを除去
+
+                        new_types = st.multiselect("🎯 生徒タイプ（複数選択可）", type_opts, default=current_types)
+
+                        if st.form_submit_button("💾 基本情報を保存", type="primary"):
+                            new_type_str = "、".join(new_types)
+                            
                             with st.spinner("☁️ 情報を保存中...（混雑時は自動で再試行します）"):
                                 def _update_info():
                                     update_student_info(
@@ -139,7 +146,7 @@ def render_student_details_page(selected_student_option):
                                         new_exam,        
                                         new_school_type,
                                         new_contract_str,
-                                        new_type
+                                        new_type_str
                                     )
                                     return True
                                 
