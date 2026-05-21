@@ -73,3 +73,21 @@ def calc_pages_from_text(text):
     for start_str, end_str in matches:
         total += abs(int(end_str) - int(start_str)) + 1
     return total
+
+def calculate_score_ratio(row, quiz_details):
+    """
+    小テストの1行データと満点マスタを受け取り、正答率（0.0〜1.0）を計算する魔法
+    """
+    q_name = str(row.get('テキスト', ''))
+    score = pd.to_numeric(row.get('点数', 100), errors='coerce')
+    
+    if pd.isna(score): 
+        return 1.0 # 点数がないエラー行は一旦無視（弱点にしない）
+    
+    # そのテストの満点を探す
+    full_m = 100
+    matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{q_name}_")]
+    if matched_marks:
+        full_m = int(pd.Series(matched_marks).mode()[0])
+    
+    return score / full_m if full_m > 0 else 1.0
