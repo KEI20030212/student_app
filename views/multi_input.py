@@ -17,7 +17,8 @@ from utils.g_sheets import (
     add_new_textbook,        
     get_textbook_master,
     save_quiz_to_dedicated_sheet,
-    get_quiz_master_dict 
+    get_quiz_master_dict,
+    get_type_advice_dict
 )
 from utils.calc_logic import (
     calculate_hw_rate, 
@@ -42,6 +43,10 @@ def cached_get_textbook_master():
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_get_quiz_master():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_get_type_advice():
+    return robust_api_call(get_type_advice_dict, fallback_value={})
 
 # 🌟 一時保存対象のキー（プレフィックス）
 DRAFT_PREFIXES = (
@@ -171,16 +176,13 @@ def render_multi_input_page():
             for i in range(num_students):
                 with cols[i]:
                     with st.container(border=True):
-                        # 🌟 【新機能】この生徒が保存済みかどうかのフラグをチェック
                         is_saved = st.session_state.get(f"saved_flag_{b}_{i}", False)
                         saved_name = st.session_state.get(f"saved_name_{b}_{i}", "生徒")
 
                         if is_saved:
-                            # 保存済みの場合は入力フォームを出さず、ステータスのみ表示（ボタンを撤去）
                             st.success(f"✅ {saved_name} さんの記録は保存済みです。")
                             st.info("💡 修正が必要な場合は、左メニューの「🛠️ 授業記録の修正」から行ってください。")
                         else:
-                            # 🔽 ここから下は通常の入力フォーム
                             selected_student = st.selectbox("生徒名", ["🆕 新規登録"] + student_options, index=None, placeholder="生徒を選択", key=f"sel_student_{b}_{i}")
                             
                             student_id = None
@@ -194,6 +196,24 @@ def render_multi_input_page():
                                 name = selected_student.split(" - ")[1]
 
                             if name:
+                                type_advice_dict = cached_get_type_advice()
+                                # 🌟 【新機能】生徒のタイプに応じた「声かけマニュアル」の自動表示
+                                student_type_str = ""
+                                if not student_df.empty and 'タイプ' in student_df.columns:
+                                    row = student_df[student_df['生徒名'] == name]
+                                    if not row.empty:
+                                        student_type_str = str(row.iloc[0].get('タイプ', ''))
+                                
+                                if student_type_str and student_type_str.lower() != "nan":
+                                    advices = []
+                                    # 🌟 直書きの TYPE_ADVICE ではなく、取得した type_advice_dict を使う
+                                    for t_key, t_adv in type_advice_dict.items():
+                                        if t_key in student_type_str:
+                                            advices.append(f"・{t_adv}")
+                                    
+                                    if advices:
+                                        st.info("💡 **指導アドバイス（生徒タイプ別）**\n\n" + "\n".join(advices))
+
                                 attendance = st.selectbox("📅 出欠状況", ["出席（通常）", "出席（振替授業を消化）", "欠席（後日振替あり）", "欠席（振替なし）"], key=f"att_{b}_{i}")
                                 late_time = st.number_input("⏰ 遅刻時間 (分)", min_value=0, value=0, step=5, key=f"late_{b}_{i}")
 
@@ -460,7 +480,6 @@ def render_multi_input_page():
                                                 status.update(label="保存完了！", state="complete", expanded=False)
                                             st.success(f"✅ {name} の記録を保存しました！")
                                             
-                                            # 🌟 【新機能】この生徒は保存完了フラグを立てて、遅延お掃除の対象にする
                                             st.session_state[f"saved_flag_{b}_{i}"] = True
                                             st.session_state[f"saved_name_{b}_{i}"] = name
                                             single_save_triggered = (b, i, name)
@@ -512,12 +531,46 @@ def render_multi_input_page():
                     
                     all_save_triggered = (b, num_students)
 
+            # 🌟 【新機能】このコマの全員の個別保存が終わったかチェックし、終わっていればリセット処理を発動！
+            saved_count = sum(1 for idx in range(num_students) if st.session_state.get(f"saved_flag_{b}_{idx}", False))
+            if saved_count == num_students and num_students > 0 and not all_save_triggered:
+                st.success("🎉 このコマの全員の入力が完了しました！画面をリセットします...")
+                all_save_triggered = (b, num_students)
+
 
     # ==========================================
     # 🧹 一番最後での遅延お掃除処理（他のタブを巻き添えにしない魔法）
     # ==========================================
     
-    if single_save_triggered:
+    if all_save_triggered:
+        # 🌟 全員保存（または全員の個別保存コンプリート）時のお掃除
+        b_idx, students_count = all_save_triggered
+        
+        for k in ["class_date", "sb_teacher", "class_type", "sb_class_slot"]:
+            if f"{k}_{b_idx}" in st.session_state:
+                del st.session_state[f"{k}_{b_idx}"]
+
+        target_prefixes = [
+            "sel_student", "new_name", "att", "late", "sub", "cont", 
+            "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
+            "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
+            "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
+            "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
+            "saved_flag", "saved_name"
+        ]
+        for i_idx in range(students_count):
+            for key in list(st.session_state.keys()):
+                for p in target_prefixes:
+                    if key == f"{p}_{b_idx}_{i_idx}" or key.startswith(f"{p}_{b_idx}_{i_idx}_"):
+                        del st.session_state[key]
+                        break
+        
+        st.cache_data.clear()
+        time.sleep(1.5)
+        st.rerun()
+
+    elif single_save_triggered:
+        # 🌟 個別保存（まだ全員終わっていない時）のお掃除
         b_idx, i_idx, saved_name = single_save_triggered
         target_prefixes = [
             "sel_student", "new_name", "att", "late", "sub", "cont", 
@@ -536,32 +589,6 @@ def render_multi_input_page():
                 if key.startswith(f"prev_data_{saved_name}_"):
                     del st.session_state[key]
                     
-        st.cache_data.clear()
-        time.sleep(1.5)
-        st.rerun()
-
-    if all_save_triggered:
-        b_idx, students_count = all_save_triggered
-        
-        for k in ["class_date", "sb_teacher", "class_type", "sb_class_slot"]:
-            if f"{k}_{b_idx}" in st.session_state:
-                del st.session_state[f"{k}_{b_idx}"]
-
-        target_prefixes = [
-            "sel_student", "new_name", "att", "late", "sub", "cont", 
-            "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
-            "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
-            "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
-            "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
-            "saved_flag", "saved_name" # 🌟 ここで保存完了フラグもお掃除！
-        ]
-        for i_idx in range(students_count):
-            for key in list(st.session_state.keys()):
-                for p in target_prefixes:
-                    if key == f"{p}_{b_idx}_{i_idx}" or key.startswith(f"{p}_{b_idx}_{i_idx}_"):
-                        del st.session_state[key]
-                        break
-        
         st.cache_data.clear()
         time.sleep(1.5)
         st.rerun()
