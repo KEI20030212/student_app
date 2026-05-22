@@ -805,6 +805,39 @@ def _update_student_master_row(student_name, hw_rate, motivation_rank):
     except Exception as e:
         print(f"生徒マスター更新エラー: {e}")
 
+def get_type_advice_dict():
+    """
+    「設定_生徒タイプ」シートから、タイプ名とアドバイス内容を取得する
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        worksheet = sh.worksheet("設定_生徒タイプ")
+        
+        all_records = worksheet.get_all_values()
+        advice_dict = {}
+        
+        # 1行目（ヘッダー）を飛ばして取得
+        for row in all_records[1:]:
+            if len(row) >= 2:
+                type_name = row[0].strip()
+                advice = row[1].strip()
+                if type_name and advice:
+                    advice_dict[type_name] = advice
+                    
+        return advice_dict
+    except Exception as e:
+        print(f"生徒タイプ設定の読み込みエラー: {e}")
+        # 万が一シートがない時のための安全装置（デフォルト値）
+        return {
+            "充実": "【充実タイプ】成長を実感できる小さなステップを提示し、達成感を味わわせましょう。",
+            "訓練": "【訓練タイプ】日々のルーチンや計画ができているかをチェックし、継続を褒めましょう。",
+            "実用": "【実用タイプ】この単元が将来どう役立つか、試験でどう活きるか目的を伝えましょう。",
+            "関係": "【関係タイプ】まずは感情に寄り添い、安心感と信頼関係を築く声かけをしましょう。",
+            "自尊": "【自尊タイプ】本人の工夫や個性を尊重し、できるだけ本人に考えさせて認めましょう。",
+            "報酬": "【報酬タイプ】頑張ったことに対して、明確なご褒美（ポイントや称賛）を与えましょう。"
+        }
+
 #edit_input.py
 def update_lesson_record_in_sheet(date_str, student_name, class_slot, new_data):
     """
