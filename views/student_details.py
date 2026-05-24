@@ -5,7 +5,7 @@ import datetime
 import time 
 import re # 🌟 文字列から数字を抽出するために追加
 
-# 🌟 変更: get_student_info を削除し、get_student_master に変更
+# 🌟 変更: get_type_advice_dict を追加インポート
 from utils.g_sheets import (
     get_student_master,
     update_student_info,
@@ -13,7 +13,8 @@ from utils.g_sheets import (
     load_test_scores,
     get_student_self_study_points,
     get_student_quiz_records,
-    get_quiz_master_dict
+    get_quiz_master_dict,
+    get_type_advice_dict # 🌟 ここに追加！
 )
 from utils.calc_logic import (
     calculate_ability_rank,
@@ -23,6 +24,11 @@ from utils.calc_logic import (
 
 # 🌟 APIガードをインポート
 from utils.api_guard import robust_api_call
+
+# 🌟 新しく追加：マニュアルをスプレッドシートから取得して記憶するキャッシュ関数
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_get_type_advice():
+    return robust_api_call(get_type_advice_dict, fallback_value={})
 
 def render_student_details_page(selected_student_option):
     if selected_student_option and " - " in selected_student_option:
@@ -67,16 +73,27 @@ def render_student_details_page(selected_student_option):
             if disp_school:
                 st.markdown(f"**🏫 学校区分**: {disp_school}")
             
-            disp_types = info.get('タイプ', '')
-            if disp_types:
-                st.markdown(f"**🎯 生徒タイプ**: {disp_types.replace('、', ' / ')}")
-            else:
-                st.markdown("**🎯 生徒タイプ**: 未設定")
+            disp_types = str(info.get('タイプ', '')).replace('未設定', '').strip()
             
             st.markdown(f"**🏫 学校名**: {info.get('学校名', '') or '未設定'}")
             st.markdown(f"**🎯 志望校・目的**: {info.get('志望校・目的', '') or '未設定'}")
             st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
             st.markdown(f"**📋 契約コース**: {info.get('契約コース', '') or '未設定'}")
+            
+            if disp_types:
+                st.markdown(f"**🎯 生徒タイプ**: {disp_types.replace('、', ' / ')}")
+                
+                # 🌟 【新機能】取得したマニュアルから、この生徒に合ったアドバイスを抽出して表示！
+                type_advice_dict = cached_get_type_advice()
+                advices = []
+                for t_key, t_adv in type_advice_dict.items():
+                    if t_key in disp_types:
+                        advices.append(f"・{t_adv}")
+                
+                if advices:
+                    st.info("💡 **指導・面談アドバイス**\n\n" + "\n".join(advices))
+            else:
+                st.markdown("**🎯 生徒タイプ**: 未設定")
             
             if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
                 with st.expander("✏️ 基本情報を編集する (教室長のみ)"):
@@ -112,6 +129,7 @@ def render_student_details_page(selected_student_option):
                         cc1, cc2 = st.columns(2)
                         b_val = cc1.number_input("Bコース", min_value=0, value=b_default, step=1)
                         q_val = cc2.number_input("Qコース", min_value=0, value=q_default, step=1)                    
+                        
                         course_parts = []
                         if b_val and b_val > 0:
                             course_parts.append(f"Bコース:{b_val}")
