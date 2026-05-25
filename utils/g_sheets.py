@@ -929,6 +929,47 @@ def update_quiz_record_in_sheet(date_str, student_name, quiz_name, old_unit, new
         print(f"小テスト修正上書き中にエラー発生: {e}")
         return False
 
+#trial_input
+def save_trial_lesson_to_spreadsheet(date, student_name, subject, text_name, advanced_p, quiz_records, teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, late_time, concentration, reaction):
+    """
+    体験授業の記録を「体験授業ログ」シートに保存する
+    """
+    import gspread
+    gc = get_gc_client()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("体験授業ログ")
+        
+        # 小テストの記録を1つの文字列にまとめる（例: "英単語(1回): 90点、漢字(2回): 100点"）
+        quiz_str = ""
+        if quiz_records:
+            quiz_str = "、".join([f"{q['quiz_name']}({q['unit']}回): {q['score']}点" for q in quiz_records])
+            
+        new_row = [
+            date.strftime("%Y/%m/%d"), # A: 日時
+            teacher_name,             # B: 担当講師
+            class_type,               # C: 授業形態
+            class_slot,               # D: 授業コマ
+            student_name,             # E: 名前
+            attendance,               # F: 出欠
+            f"{late_time}分",         # G: 遅刻時間
+            subject,                  # H: 科目
+            text_name,                # I: テキスト
+            advanced_p,               # J: 終了ページ
+            quiz_str,                 # K: 小テスト記録
+            "",                       # L: やる気ランク (後で計算して入れたい場合はロジックを追加)
+            concentration,            # M: 集中力
+            reaction,                 # N: ミスへの反応
+            advice,                   # O: 授業アドバイス
+            parent_msg,               # P: 保護者への連絡
+            next_handover             # Q: 次回への引継ぎ
+        ]
+        ws.append_row(new_row)
+        return True
+    except Exception as e:
+        print(f"体験授業記録の保存エラー: {e}")
+        return False
+
 #dashboard.py
 def load_quiz_records():
     """
