@@ -53,7 +53,7 @@ DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
     "adv_start", "adv_end", "num_q", "q_name", "q_chap", "q_score", "w",
-    "cont", "done_start", "done_end", "conc", "reac", "hw_texts", "new_hw_text", 
+    "cont", "hw_forgot", "done_start", "done_end", "conc", "reac", "hw_texts", "new_hw_text", 
     "n_start", "n_end", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num"
 )
 
@@ -197,7 +197,6 @@ def render_multi_input_page():
 
                             if name:
                                 type_advice_dict = cached_get_type_advice()
-                                # 🌟 【新機能】生徒のタイプに応じた「声かけマニュアル」の自動表示
                                 student_type_str = ""
                                 if not student_df.empty and 'タイプ' in student_df.columns:
                                     row = student_df[student_df['生徒名'] == name]
@@ -206,7 +205,6 @@ def render_multi_input_page():
                                 
                                 if student_type_str and student_type_str.lower() != "nan":
                                     advices = []
-                                    # 🌟 直書きの TYPE_ADVICE ではなく、取得した type_advice_dict を使う
                                     for t_key, t_adv in type_advice_dict.items():
                                         if t_key in student_type_str:
                                             advices.append(f"・{t_adv}")
@@ -253,7 +251,7 @@ def render_multi_input_page():
 
                                         st.info(
                                             f"💡 **【前回 ({subject}) の引継ぎ・宿題・進捗】**\n\n"
-                                            f"📖 **前回の授業進捗:**  \n{formatted_last_page}\n\n"
+                                            f"📖 **前回の授業進捗:** \n{formatted_last_page}\n\n"
                                             f"📚 **宿題テキスト:** {last_hw_text}\n"
                                             f"🎯 **宿題の範囲:** \n{formatted_last_hw_pages}\n\n"
                                             f"💬 **引継ぎメモ:**\n{last_note}"
@@ -274,11 +272,17 @@ def render_multi_input_page():
 
                                         st.write("📝 **今回の宿題達成状況**")
                                         is_continuous = st.checkbox("🔄 追加連続コマ（宿題チェックをスキップし、前回分を引き継ぐ）", key=f"cont_{b}_{i}")
+                                        
+                                        # 🌟 新機能：宿題やってこなかったボタン
+                                        is_hw_forgotten = st.checkbox("❌ 宿題をやってこなかった（0ページとして記録）", key=f"hw_forgot_{b}_{i}")
                                         completed_p = 0
                                         
                                         if is_continuous:
                                             st.info("💡 連続コマモード：今回の宿題確認は行わず、前回の宿題をそのまま「次回の宿題指示」に引き継ぎます。")
                                             assigned_p = 0 
+                                        elif is_hw_forgotten:
+                                            st.warning("⚠️ 宿題未実施として、今回の実施ページを「0ページ」で記録します。")
+                                            completed_p = 0
                                         else:
                                             if not assigned_hw_list:
                                                 st.caption("※宿題指示が特殊形式のため個別表示できません。やったページ数を入力してください。")
@@ -551,7 +555,7 @@ def render_multi_input_page():
                 del st.session_state[f"{k}_{b_idx}"]
 
         target_prefixes = [
-            "sel_student", "new_name", "att", "late", "sub", "cont", 
+            "sel_student", "new_name", "att", "late", "sub", "cont", "hw_forgot", 
             "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
@@ -573,7 +577,7 @@ def render_multi_input_page():
         # 🌟 個別保存（まだ全員終わっていない時）のお掃除
         b_idx, i_idx, saved_name = single_save_triggered
         target_prefixes = [
-            "sel_student", "new_name", "att", "late", "sub", "cont", 
+            "sel_student", "new_name", "att", "late", "sub", "cont", "hw_forgot",
             "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
