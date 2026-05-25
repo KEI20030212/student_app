@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd # 🌟 DataFrameを使うために追加
 
-# 裏方部隊から、座席データを読み書きする関数などを呼び出します
-# 🌟 変更: get_all_student_names を get_student_master に変更
 from utils.g_sheets import (
     get_student_master,
     load_seating_data,

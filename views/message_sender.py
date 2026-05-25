@@ -1,13 +1,16 @@
 import streamlit as st
 from utils.g_sheets import get_all_accounts, save_message, get_sent_messages
+from utils.api_guard import robust_api_call  # 🌟 APIガードをインポート
 
 def render_message_sender_page():
     st.header("💌 メッセージ送信")
 
     tab1, tab2 = st.tabs(["✏️ メッセージを送る", "🕰️ 送信履歴を見る"])
 
-    raw_accounts = get_all_accounts()
-    safe_accounts = {str(k).strip().lower(): v for k, v in raw_accounts.items()}
+    # 🛡️ APIガード適用: アカウント情報の取得
+    raw_accounts = robust_api_call(get_all_accounts, fallback_value={})
+    # 万が一エラーで空のリストなどが返ってきた場合の型エラーを防ぐ
+    safe_accounts = {str(k).strip().lower(): v for k, v in raw_accounts.items()} if isinstance(raw_accounts, dict) else {}
 
     # ==========================================
     # タブ1：送信フォーム
@@ -45,9 +48,15 @@ def render_message_sender_page():
                         sender_id = str(st.session_state.get('user_id', 'unknown')).strip()
                         
                         with st.spinner("送信中..."):
-                            success = save_message(sender_id, receiver_id, message_body)
-                        if success:
+                            # 🛡️ APIガード適用: メッセージの保存
+                            success = robust_api_call(
+                                lambda: save_message(sender_id, receiver_id, message_body), 
+                                fallback_value=False
+                            )
+                        if success is not False:
                             st.success(f"✅ {selected_label} 宛にメッセージを送信しました！")
+                        else:
+                            st.error("⚠️ 通信エラーによりメッセージを送信できませんでした。少し時間をおいて再度お試しください。")
 
     # ==========================================
     # タブ2：送信履歴の表示
@@ -57,10 +66,12 @@ def render_message_sender_page():
         
         my_user_id = str(st.session_state.get('user_id', '')).strip().lower()
         if my_user_id:
-            sent_msgs = get_sent_messages(my_user_id)
+            # 🛡️ APIガード適用: 送信履歴の取得
+            sent_msgs = robust_api_call(lambda: get_sent_messages(my_user_id), fallback_value=[])
             
-            if not sent_msgs:
-                st.info("まだ送信したメッセージはありません。")
+            # APIエラー発生時の特殊な辞書が返ってきた場合のチェックも追加
+            if not sent_msgs or (isinstance(sent_msgs, dict) and "APIエラー発生" in sent_msgs):
+                st.info("まだ送信したメッセージはありません。（または通信エラーで取得できませんでした）")
             else:
                 unread_msgs = [m for m in sent_msgs if m.get("状態", "未読") in ["未読", "False"]]
                 read_msgs = [m for m in sent_msgs if m not in unread_msgs]
@@ -141,7 +152,7 @@ def render_message_sender_page():
                                     st.markdown(f"**{receiver_name} 宛て** 🕒 {date_str} / **✅ 既読**")
                                     formatted_text = text.replace('\n', '  \n')
                                     st.write(formatted_text)
-                            
+                        
                             # 検索した結果、1件も見つからなかった場合の表示
                             if search_query and found_count == 0:
                                 st.info(f"「{search_query}」を含むメッセージは見つかりませんでした。")

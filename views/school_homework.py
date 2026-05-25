@@ -3,7 +3,6 @@ import pandas as pd
 from datetime import date, datetime
 import time
 
-# 🌟 変更: 古い関数を削り、get_student_master を追加！
 from utils.g_sheets import (
     load_school_homework_data, 
     update_homework_status, 
