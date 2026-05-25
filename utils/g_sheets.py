@@ -885,6 +885,50 @@ def update_lesson_record_in_sheet(date_str, student_name, class_slot, new_data):
         print(f"修正上書き中にエラー発生: {e}")
         return False
 
+def update_quiz_record_in_sheet(date_str, student_name, quiz_name, old_unit, new_unit, new_score):
+    """
+    【修正用】指定された「日付・生徒名・テスト名・元の単元」に一致する小テストを探し出し、上書きする関数
+    """
+    gc = get_gc_client()
+    try:
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("小テスト記録") 
+        
+        all_values = ws.get_all_values()
+        if not all_values: return False
+        
+        header = all_values[0]
+        target_row_idx = -1
+        
+        for i, row in enumerate(all_values):
+            if i == 0: continue
+            row_dict = dict(zip(header, row))
+            
+            if str(row_dict.get('日時', '')).startswith(date_str) and \
+               row_dict.get('名前') == student_name and \
+               row_dict.get('テキスト') == quiz_name and \
+               str(row_dict.get('単元', '')) == str(old_unit):
+                
+                target_row_idx = i + 1 
+                existing_row = row
+                break
+        
+        if target_row_idx == -1: return False # 見つからなかった
+        
+        # 新しい単元と点数で上書き
+        if '単元' in header:
+            existing_row[header.index('単元')] = str(new_unit)
+        if '点数' in header:
+            existing_row[header.index('点数')] = str(new_score)
+            
+        range_label = f"A{target_row_idx}:{gspread.utils.rowcol_to_a1(target_row_idx, len(header))}"
+        ws.update(range_name=range_label, values=[existing_row])
+        return True
+        
+    except Exception as e:
+        print(f"小テスト修正上書き中にエラー発生: {e}")
+        return False
+
 #dashboard.py
 def load_quiz_records():
     """
