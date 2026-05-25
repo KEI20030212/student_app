@@ -9,7 +9,7 @@ def render_combined_input_page():
 
     record_type = st.radio(
         "✍️ 記録の種類を選択してください", 
-        ["📖 授業記録（新規）", "🔰 体験授業の入力", "📝 自習記録", "🛠️ 授業記録の修正"], 
+        ["📖 授業記録（新規）", "📝 自習記録", "🛠️ 授業記録の修正"], 
         horizontal=True, 
         key="record_type_combined"
     )
