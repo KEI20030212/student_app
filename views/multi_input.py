@@ -3,7 +3,6 @@ import datetime
 import time
 import re
 import os
-import pickle
 import pandas as pd
 
 from utils.g_sheets import (
@@ -18,7 +17,11 @@ from utils.g_sheets import (
     get_textbook_master,
     save_quiz_to_dedicated_sheet,
     get_quiz_master_dict,
-    get_type_advice_dict
+    get_type_advice_dict,
+    # 🌟 クラウド下書き機能のインポートを追加
+    save_draft_to_sheet,
+    load_draft_from_sheet,
+    delete_draft_from_sheet
 )
 from utils.calc_logic import (
     calculate_hw_rate, 
@@ -48,7 +51,7 @@ def cached_get_quiz_master():
 def cached_get_type_advice():
     return robust_api_call(get_type_advice_dict, fallback_value={})
 
-# 🌟 一時保存対象のキー（プレフィックス）
+# 🌟 一時保存対象のキー
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
@@ -58,7 +61,7 @@ DRAFT_PREFIXES = (
 )
 
 # ==========================================
-# 🌟 【究極の解決策】タブ増減のコールバック関数
+# 🌟 タブ増減のコールバック関数
 # ==========================================
 def add_tab():
     st.session_state['num_blocks'] = st.session_state.get('num_blocks', 1) + 1
@@ -74,43 +77,80 @@ def remove_tab():
 
 def render_multi_input_page():
     user_id = st.session_state.get('user_id', st.session_state.get('username', 'default_user'))
-    draft_file = f"draft_{user_id}.pkl"
 
     with st.sidebar:
-        st.header("💾 鉄壁の一時保存メニュー")
-        st.caption("アプリが落ちても、ブラウザを閉じても復元できます！")
+        st.header("☁️ クラウド下書き保存")
+        st.caption("サーバーがスリープしても、データはスプレッドシートに守られます！")
         
+        last_saved_time = st.session_state.get('last_saved_time', None)
+        if last_saved_time:
+            st.success(f"🕒 最終保存: {last_saved_time}")
+        else:
+            st.caption("最終保存日時: 未取得（またはデータなし）")
+            
         c1, c2 = st.columns(2)
-        if c1.button("💾 保存", use_container_width=True):
+        if c1.button("☁️ 保存", use_container_width=True):
             draft = {}
             for k, v in st.session_state.items():
                 if any(k.startswith(p) for p in DRAFT_PREFIXES):
                     draft[k] = v
-            with open(draft_file, "wb") as f:
-                pickle.dump(draft, f)
-            st.success("鉄壁保存しました！")
+            
+            if not draft or len(draft) < 3:
+                st.error("⚠️ 入力データがないため保存をキャンセルしました。")
+            else:
+                with st.spinner("クラウドへ保存中..."):
+                    success, saved_time = robust_api_call(
+                        save_draft_to_sheet, 
+                        username=user_id, 
+                        draft_data=draft,
+                        fallback_value=(False, None)
+                    )
+                    if success:
+                        st.session_state['last_saved_time'] = saved_time
+                        st.success("✅ クラウド保存完了！")
+                        time.sleep(1.5)
+                        st.rerun()
+                    else:
+                        st.error("保存に失敗しました。")
             
         if c2.button("📂 復元", use_container_width=True):
-            if os.path.exists(draft_file):
-                with open(draft_file, "rb") as f:
-                    draft = pickle.load(f)
-                for k, v in draft.items():
-                    st.session_state[k] = v
-                st.success("復元しました！")
-                time.sleep(1)
-                st.rerun() 
-            else:
-                st.warning("保存データがありません")
+            with st.spinner("クラウドから復元中..."):
+                draft, saved_time = robust_api_call(
+                    load_draft_from_sheet, 
+                    username=user_id,
+                    fallback_value=(None, None)
+                )
                 
+                if draft:
+                    for k, v in draft.items():
+                        st.session_state[k] = v
+                    st.session_state['last_saved_time'] = saved_time
+                    st.success("✅ 復元しました！")
+                    time.sleep(1.5)
+                    st.rerun() 
+                else:
+                    st.warning("クラウドに保存データがありません")
+                    
         if st.button("🗑️ 保存データを削除", use_container_width=True):
-            if os.path.exists(draft_file):
-                os.remove(draft_file)
-                st.success("削除しました！")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.info("削除するデータがありません")
+            with st.spinner("削除中..."):
+                success = robust_api_call(
+                    delete_draft_from_sheet,
+                    username=user_id,
+                    fallback_value=False
+                )
+                if success:
+                    st.session_state['last_saved_time'] = None
+                    st.success("✅ 削除しました！")
+                    time.sleep(1.5)
+                    st.rerun()
+                else:
+                    st.error("削除に失敗しました")
         st.divider()
+        st.warning("🚨 **【重要】離席時の注意**\n\n一定時間でサーバーがスリープします。**入力途中で離席する際は必ず「☁️ 保存」を押してください！**")
+
+    # 🌟 防御：保存データがあるのに気づかず上書き入力してしまうのを防ぐアラート
+    if last_saved_time:
+        st.error("⚠️ **前回中断した入力データがクラウドに残っています！** 続きから入力する場合は、左メニューの「📂 復元」を先に押してください。")
 
     student_df = cached_get_student_master()
     if not student_df.empty:
@@ -183,7 +223,6 @@ def render_multi_input_page():
                             st.success(f"✅ {saved_name} さんの記録は保存済みです。")
                             st.info("💡 修正が必要な場合は、左メニューの「🛠️ 授業記録の修正」から行ってください。")
                         else:
-                            # 🌟 選択肢に「体験」を追加
                             student_choices = ["🆕 新規登録（通常）", "🔰 新規登録（体験）"] + student_options
                             selected_student = st.selectbox("生徒名", student_choices, index=None, placeholder="生徒を選択", key=f"sel_student_{b}_{i}")
                             
@@ -197,7 +236,7 @@ def render_multi_input_page():
                             elif selected_student == "🔰 新規登録（体験）":
                                 name = st.text_input("体験生徒の名前", key=f"new_name_{b}_{i}")
                                 student_id = "TRIAL"
-                                is_trial = True # 🌟 体験フラグON
+                                is_trial = True 
                             elif selected_student:
                                 student_id = selected_student.split(" - ")[0]
                                 name = selected_student.split(" - ")[1]
@@ -242,7 +281,6 @@ def render_multi_input_page():
                                         completed_p = 0
                                         last_page_num = 0
                                         
-                                        # 🌟 体験授業の場合は宿題チェックをスキップ
                                         if is_trial:
                                             st.info("🔰 体験生モード：前回の引き継ぎ・宿題確認はスキップされます。")
                                         else:
@@ -406,7 +444,6 @@ def render_multi_input_page():
                                         selected_hw_text_str = "-"
                                         next_hw_pages_str = "-"
                                         
-                                        # 🌟 体験生の場合は次回の宿題指示をスキップ
                                         if is_trial:
                                             st.info("🔰 体験生モード：次回の宿題指示はスキップされます。")
                                         else:
@@ -453,7 +490,6 @@ def render_multi_input_page():
                                                 st.caption(f"スプレッドシートに保存される範囲:\n{next_hw_pages_str}")
 
                                         st.divider()
-                                        # 🌟 コメントの項目名を体験生と通常生で切り替える
                                         if is_trial:
                                             st.write("💬 **体験授業コメント**")
                                             advice = st.text_area("🌟 生徒の長所・褒めた点", height=80, key=f"advc_{b}_{i}")
@@ -475,7 +511,7 @@ def render_multi_input_page():
                                             "motivation_rank": motivation_rank, 
                                             "next_hw_text": selected_hw_text_str, 
                                             "next_hw_pages": next_hw_pages_str,
-                                            "is_trial": is_trial # 🌟 追加
+                                            "is_trial": is_trial
                                         })
 
                                         st.divider()
@@ -501,7 +537,6 @@ def render_multi_input_page():
                                                             chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                                         )
                                                 
-                                                # 🌟 体験生の場合は宿題率の更新をスキップ
                                                 if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
                                                     try:
                                                         robust_api_call(update_student_homework_rate, name, subject, assigned_p, completed_p)
@@ -511,8 +546,10 @@ def render_multi_input_page():
                                                 status.update(label="保存完了！", state="complete", expanded=False)
                                             st.success(f"✅ {name} の記録を保存しました！")
                                             
+                                            # セッションへの保存処理と、次回読み込みのための「last_saved_time」をクリアして事故防止
                                             st.session_state[f"saved_flag_{b}_{i}"] = True
                                             st.session_state[f"saved_name_{b}_{i}"] = name
+                                            st.session_state['last_saved_time'] = None 
                                             single_save_triggered = (b, i, name)
 
             st.divider()
@@ -550,7 +587,6 @@ def render_multi_input_page():
                                         chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                     )
                             
-                            # 🌟 体験生の場合は宿題率の更新をスキップ
                             if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
                                 try:
                                     robust_api_call(update_student_homework_rate, data["name"], data["subject"], data["assigned_p"], data["completed_p"])
@@ -560,22 +596,20 @@ def render_multi_input_page():
                         status.update(label="保存完了！", state="complete", expanded=False)
 
                     st.success(f"✅ コマ {b+1}（{actual_attendees}名）の記録を保存しました！")
+                    st.session_state['last_saved_time'] = None 
                     
                     all_save_triggered = (b, num_students)
 
-            # 🌟 このコマの全員の個別保存が終わったかチェックし、終わっていればリセット処理を発動！
             saved_count = sum(1 for idx in range(num_students) if st.session_state.get(f"saved_flag_{b}_{idx}", False))
             if saved_count == num_students and num_students > 0 and not all_save_triggered:
                 st.success("🎉 このコマの全員の入力が完了しました！画面をリセットします...")
                 all_save_triggered = (b, num_students)
 
-
     # ==========================================
-    # 🧹 一番最後での遅延お掃除処理（他のタブを巻き添えにしない魔法）
+    # 🧹 一番最後での遅延お掃除処理
     # ==========================================
     
     if all_save_triggered:
-        # 🌟 全員保存（または全員の個別保存コンプリート）時のお掃除
         b_idx, students_count = all_save_triggered
         
         for k in ["class_date", "sb_teacher", "class_type", "sb_class_slot"]:
@@ -602,7 +636,6 @@ def render_multi_input_page():
         st.rerun()
 
     elif single_save_triggered:
-        # 🌟 個別保存（まだ全員終わっていない時）のお掃除
         b_idx, i_idx, saved_name = single_save_triggered
         target_prefixes = [
             "sel_student", "new_name", "att", "late", "sub", "cont", "hw_forgot",
