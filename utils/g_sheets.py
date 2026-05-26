@@ -9,6 +9,7 @@ import math
 import time
 import streamlit.components.v1 as components
 import base64
+import pickle
 import altair as alt # 座標グラフを描くための魔法の絵の具
 
 def get_jst_now():
