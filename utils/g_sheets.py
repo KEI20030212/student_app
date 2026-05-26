@@ -838,6 +838,79 @@ def get_type_advice_dict():
             "報酬": "【報酬タイプ】頑張ったことに対して、明確なご褒美（ポイントや称賛）を与えましょう。"
         }
 
+def save_draft_to_sheet(username, draft_data):
+    """【下書き機能】データを暗号化してスプレッドシートに保存する"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("下書き保存")
+        
+        # 🌟 日付データなどを安全に保存するため、データを丸ごと文字列（base64）に変換する魔法
+        b64_data = base64.b64encode(pickle.dumps(draft_data)).decode('utf-8')
+        now_str = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+        
+        all_records = ws.get_all_values()
+        target_row = -1
+        
+        # すでにこのユーザーの保存データがあるか探す
+        for i, row in enumerate(all_records):
+            if len(row) > 0 and row[0] == username:
+                target_row = i + 1
+                break
+                
+        if target_row != -1:
+            # 上書き保存
+            ws.update(range_name=f"A{target_row}:C{target_row}", values=[[username, b64_data, now_str]])
+        else:
+            # 新規保存
+            ws.append_row([username, b64_data, now_str])
+        return True, now_str
+    except Exception as e:
+        print(f"下書き保存エラー: {e}")
+        return False, None
+
+def load_draft_from_sheet(username):
+    """【下書き機能】スプレッドシートからデータを取得し、復元する"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("下書き保存")
+        
+        all_records = ws.get_all_values()
+        for row in all_records:
+            if len(row) >= 3 and row[0] == username:
+                b64_data = row[1]
+                timestamp = row[2]
+                if b64_data:
+                    # 文字列を元のデータ（辞書）に戻す魔法
+                    draft_data = pickle.loads(base64.b64decode(b64_data))
+                    return draft_data, timestamp
+        return None, None
+    except Exception as e:
+        print(f"下書き読み込みエラー: {e}")
+        return None, None
+
+def delete_draft_from_sheet(username):
+    """【下書き機能】保存データを空にする"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("下書き保存")
+        
+        all_records = ws.get_all_values()
+        for i, row in enumerate(all_records):
+            if len(row) > 0 and row[0] == username:
+                # データを消去（行を消すとズレるので、B・C列だけ空にする）
+                ws.update(range_name=f"B{i+1}:C{i+1}", values=[["", ""]])
+                return True
+        return True
+    except Exception as e:
+        print(f"下書き削除エラー: {e}")
+        return False
+
 #edit_input.py
 def update_lesson_record_in_sheet(date_str, student_name, class_slot, new_data):
     """
