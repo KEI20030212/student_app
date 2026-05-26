@@ -183,14 +183,21 @@ def render_multi_input_page():
                             st.success(f"✅ {saved_name} さんの記録は保存済みです。")
                             st.info("💡 修正が必要な場合は、左メニューの「🛠️ 授業記録の修正」から行ってください。")
                         else:
-                            selected_student = st.selectbox("生徒名", ["🆕 新規登録"] + student_options, index=None, placeholder="生徒を選択", key=f"sel_student_{b}_{i}")
+                            # 🌟 選択肢に「体験」を追加
+                            student_choices = ["🆕 新規登録（通常）", "🔰 新規登録（体験）"] + student_options
+                            selected_student = st.selectbox("生徒名", student_choices, index=None, placeholder="生徒を選択", key=f"sel_student_{b}_{i}")
                             
                             student_id = None
                             name = None
+                            is_trial = False
 
-                            if selected_student == "🆕 新規登録":
+                            if selected_student == "🆕 新規登録（通常）":
                                 name = st.text_input("新しい生徒の名前", key=f"new_name_{b}_{i}")
                                 student_id = "NEW" 
+                            elif selected_student == "🔰 新規登録（体験）":
+                                name = st.text_input("体験生徒の名前", key=f"new_name_{b}_{i}")
+                                student_id = "TRIAL"
+                                is_trial = True # 🌟 体験フラグON
                             elif selected_student:
                                 student_id = selected_student.split(" - ")[0]
                                 name = selected_student.split(" - ")[1]
@@ -223,7 +230,7 @@ def render_multi_input_page():
                                         "late_time": late_time, "concentration": "-", "reaction": "-",
                                         "advice": "-", "parent_msg": "-", "next_handover": "-",
                                         "assigned_p": 0, "completed_p": 0, "motivation_rank": 0, 
-                                        "next_hw_text": "-", "next_hw_pages": "-"
+                                        "next_hw_text": "-", "next_hw_pages": "-", "is_trial": is_trial
                                     })
                                 else:
                                     subject = st.selectbox("科目", ["英語", "数学", "国語", "理科", "社会"], index=None, placeholder="科目を選択", key=f"sub_{b}_{i}")
@@ -231,81 +238,85 @@ def render_multi_input_page():
                                     if not subject:
                                         st.info("👆 科目を選択すると詳細入力が開きます")
                                     else:
-                                        cache_key = f"prev_data_{name}_{subject}"
-                                        if cache_key not in st.session_state:
-                                            with st.spinner("☁️ 過去のデータを読み込み中..."):
-                                                st.session_state[cache_key] = {
-                                                    "note": robust_api_call(get_last_handover, name, subject),
-                                                    "hw_info": robust_api_call(get_last_homework_info, name, subject),
-                                                    "page": robust_api_call(get_last_page_from_sheet, name, subject)
-                                                }
-                                        
-                                        cached_data = st.session_state[cache_key]
-                                        last_note = cached_data["note"]
-                                        last_hw_text, last_hw_pages = cached_data["hw_info"]
-                                        last_page = cached_data["page"]
-                                        
-                                        last_page_num = int(last_page) if str(last_page).isdigit() else 0
-                                        formatted_last_page = str(last_page).replace('\n', '  \n')
-                                        formatted_last_hw_pages = str(last_hw_pages).replace('\n', '  \n')
-
-                                        st.info(
-                                            f"💡 **【前回 ({subject}) の引継ぎ・宿題・進捗】**\n\n"
-                                            f"📖 **前回の授業進捗:** \n{formatted_last_page}\n\n"
-                                            f"📚 **宿題テキスト:** {last_hw_text}\n"
-                                            f"🎯 **宿題の範囲:** \n{formatted_last_hw_pages}\n\n"
-                                            f"💬 **引継ぎメモ:**\n{last_note}"
-                                        )
-                                        
                                         assigned_p = 0
-                                        assigned_hw_list = []
-                                        if str(last_hw_pages).strip() and str(last_hw_pages).strip() != "-":
-                                            for line in str(last_hw_pages).split('\n'):
-                                                match = re.search(r'(?:(.*?)[:：]\s*)?[P\.]*(\d+)\s*[〜~-]\s*(\d+)', line)
-                                                if match:
-                                                    t_name = match.group(1) or str(last_hw_text).split('、')[0]
-                                                    a_start, a_end = int(match.group(2)), int(match.group(3))
-                                                    if a_end >= a_start:
-                                                        pages = a_end - a_start + 1
-                                                        assigned_p += pages
-                                                        assigned_hw_list.append({"text": t_name.strip(), "start": a_start, "end": a_end, "pages": pages})
-
-                                        st.write("📝 **今回の宿題達成状況**")
-                                        is_continuous = st.checkbox("🔄 追加連続コマ（宿題チェックをスキップし、前回分を引き継ぐ）", key=f"cont_{b}_{i}")
-                                        
-                                        # 🌟 新機能：宿題やってこなかったボタン
-                                        is_hw_forgotten = st.checkbox("❌ 宿題をやってこなかった（0ページとして記録）", key=f"hw_forgot_{b}_{i}")
                                         completed_p = 0
+                                        last_page_num = 0
                                         
-                                        if is_continuous:
-                                            st.info("💡 連続コマモード：今回の宿題確認は行わず、前回の宿題をそのまま「次回の宿題指示」に引き継ぎます。")
-                                            assigned_p = 0 
-                                        elif is_hw_forgotten:
-                                            st.warning("⚠️ 宿題未実施として、今回の実施ページを「0ページ」で記録します。")
-                                            completed_p = 0
+                                        # 🌟 体験授業の場合は宿題チェックをスキップ
+                                        if is_trial:
+                                            st.info("🔰 体験生モード：前回の引き継ぎ・宿題確認はスキップされます。")
                                         else:
-                                            if not assigned_hw_list:
-                                                st.caption("※宿題指示が特殊形式のため個別表示できません。やったページ数を入力してください。")
-                                                c_hw1, c_hw2 = st.columns(2)
-                                                with c_hw1:
-                                                    done_start = st.number_input("やった開始P", min_value=0, value=0, key=f"done_start_{b}_{i}")
-                                                with c_hw2:
-                                                    done_end = st.number_input("やった終了P", min_value=0, value=0, key=f"done_end_{b}_{i}")
-                                                if done_end >= done_start and done_end > 0:
-                                                    completed_p = done_end - done_start + 1
+                                            cache_key = f"prev_data_{name}_{subject}"
+                                            if cache_key not in st.session_state:
+                                                with st.spinner("☁️ 過去のデータを読み込み中..."):
+                                                    st.session_state[cache_key] = {
+                                                        "note": robust_api_call(get_last_handover, name, subject),
+                                                        "hw_info": robust_api_call(get_last_homework_info, name, subject),
+                                                        "page": robust_api_call(get_last_page_from_sheet, name, subject)
+                                                    }
+                                            
+                                            cached_data = st.session_state[cache_key]
+                                            last_note = cached_data["note"]
+                                            last_hw_text, last_hw_pages = cached_data["hw_info"]
+                                            last_page = cached_data["page"]
+                                            
+                                            last_page_num = int(last_page) if str(last_page).isdigit() else 0
+                                            formatted_last_page = str(last_page).replace('\n', '  \n')
+                                            formatted_last_hw_pages = str(last_hw_pages).replace('\n', '  \n')
+
+                                            st.info(
+                                                f"💡 **【前回 ({subject}) の引継ぎ・宿題・進捗】**\n\n"
+                                                f"📖 **前回の授業進捗:** \n{formatted_last_page}\n\n"
+                                                f"📚 **宿題テキスト:** {last_hw_text}\n"
+                                                f"🎯 **宿題の範囲:** \n{formatted_last_hw_pages}\n\n"
+                                                f"💬 **引継ぎメモ:**\n{last_note}"
+                                            )
+                                            
+                                            assigned_hw_list = []
+                                            if str(last_hw_pages).strip() and str(last_hw_pages).strip() != "-":
+                                                for line in str(last_hw_pages).split('\n'):
+                                                    match = re.search(r'(?:(.*?)[:：]\s*)?[P\.]*(\d+)\s*[〜~-]\s*(\d+)', line)
+                                                    if match:
+                                                        t_name = match.group(1) or str(last_hw_text).split('、')[0]
+                                                        a_start, a_end = int(match.group(2)), int(match.group(3))
+                                                        if a_end >= a_start:
+                                                            pages = a_end - a_start + 1
+                                                            assigned_p += pages
+                                                            assigned_hw_list.append({"text": t_name.strip(), "start": a_start, "end": a_end, "pages": pages})
+
+                                            st.write("📝 **今回の宿題達成状況**")
+                                            is_continuous = st.checkbox("🔄 追加連続コマ（宿題チェックをスキップし、前回分を引き継ぐ）", key=f"cont_{b}_{i}")
+                                            is_hw_forgotten = st.checkbox("❌ 宿題をやってこなかった（0ページとして記録）", key=f"hw_forgot_{b}_{i}")
+                                            
+                                            if is_continuous:
+                                                st.info("💡 連続コマモード：今回の宿題確認は行わず、前回の宿題をそのまま「次回の宿題指示」に引き継ぎます。")
+                                                assigned_p = 0 
+                                            elif is_hw_forgotten:
+                                                st.warning("⚠️ 宿題未実施として、今回の実施ページを「0ページ」で記録します。")
+                                                completed_p = 0
                                             else:
-                                                for h_idx, hw in enumerate(assigned_hw_list):
-                                                    st.caption(f"📘 {hw['text']} (指示: P.{hw['start']}〜{hw['end']})")
+                                                if not assigned_hw_list:
+                                                    st.caption("※宿題指示が特殊形式のため個別表示できません。やったページ数を入力してください。")
                                                     c_hw1, c_hw2 = st.columns(2)
                                                     with c_hw1:
-                                                        d_start = st.number_input("やった開始P", min_value=0, value=hw['start'], key=f"d_s_{b}_{i}_{h_idx}")
+                                                        done_start = st.number_input("やった開始P", min_value=0, value=0, key=f"done_start_{b}_{i}")
                                                     with c_hw2:
-                                                        d_end = st.number_input("やった終了P", min_value=0, value=hw['end'], key=f"d_e_{b}_{i}_{h_idx}")
-                                                    
-                                                    if d_end >= d_start and d_end > 0:
-                                                        completed_p += (d_end - d_start + 1)
+                                                        done_end = st.number_input("やった終了P", min_value=0, value=0, key=f"done_end_{b}_{i}")
+                                                    if done_end >= done_start and done_end > 0:
+                                                        completed_p = done_end - done_start + 1
+                                                else:
+                                                    for h_idx, hw in enumerate(assigned_hw_list):
+                                                        st.caption(f"📘 {hw['text']} (指示: P.{hw['start']}〜{hw['end']})")
+                                                        c_hw1, c_hw2 = st.columns(2)
+                                                        with c_hw1:
+                                                            d_start = st.number_input("やった開始P", min_value=0, value=hw['start'], key=f"d_s_{b}_{i}_{h_idx}")
+                                                        with c_hw2:
+                                                            d_end = st.number_input("やった終了P", min_value=0, value=hw['end'], key=f"d_e_{b}_{i}_{h_idx}")
                                                         
-                                            st.caption(f"📊 シート保存データ ➡ 出した宿題(自動計算): **{assigned_p}** P / やった宿題: **{completed_p}** P")
+                                                        if d_end >= d_start and d_end > 0:
+                                                            completed_p += (d_end - d_start + 1)
+                                                            
+                                                st.caption(f"📊 シート保存データ ➡ 出した宿題(自動計算): **{assigned_p}** P / やった宿題: **{completed_p}** P")
                                         
                                         st.divider() 
 
@@ -392,53 +403,67 @@ def render_multi_input_page():
                                         
                                         st.divider()
 
-                                        st.write("🚀 **次回の宿題指示**")
+                                        selected_hw_text_str = "-"
+                                        next_hw_pages_str = "-"
                                         
-                                        if is_continuous:
-                                            selected_hw_text_str = str(last_hw_text)
-                                            next_hw_pages_str = str(last_hw_pages)
-                                            st.info(f"🔄 【自動引き継ぎ内容】\n\n📚 テキスト: **{selected_hw_text_str}**\n🎯 範囲: \n{next_hw_pages_str}")
+                                        # 🌟 体験生の場合は次回の宿題指示をスキップ
+                                        if is_trial:
+                                            st.info("🔰 体験生モード：次回の宿題指示はスキップされます。")
                                         else:
-                                            hw_text_options = ["🆕 新規テキスト入力"] + text_options
-                                            selected_hw_texts = st.multiselect("次回の宿題テキスト (複数可)", hw_text_options, key=f"hw_texts_{b}_{i}")
-
-                                            if "🆕 新規テキスト入力" in selected_hw_texts:
-                                                new_text_name = st.text_input("新規テキスト名を入力", key=f"new_hw_text_{b}_{i}")
-                                                if new_text_name:
-                                                    robust_api_call(add_new_textbook, new_text_name)
-                                                    selected_hw_texts.remove("🆕 新規テキスト入力")
-                                                    if new_text_name not in selected_hw_texts:
-                                                        selected_hw_texts.append(new_text_name)
-                                                    cached_get_textbook_master.clear()
-
-                                            next_hw_pages_list = []
-                                            if selected_hw_texts:
-                                                for t_idx, hw_text in enumerate(selected_hw_texts):
-                                                    st.write(f"📘 **{hw_text}** の宿題")
-                                                    
-                                                    num_ranges = st.number_input(f"【{hw_text}】から出す範囲の数 (飛び石対応)", min_value=1, max_value=5, value=1, key=f"hw_ranges_num_{b}_{i}_{t_idx}")
-                                                    
-                                                    for r_idx in range(num_ranges):
-                                                        n_s_col, n_e_col = st.columns(2)
-                                                        next_start = n_s_col.number_input(f"開始P ({r_idx+1})", min_value=0, value=0, key=f"n_s_{b}_{i}_{t_idx}_{r_idx}")
-                                                        next_end = n_e_col.number_input(f"終了P ({r_idx+1})", min_value=0, value=0, key=f"n_e_{b}_{i}_{t_idx}_{r_idx}")
-                                                        
-                                                        if next_end >= next_start and next_end > 0:
-                                                            next_hw_pages_list.append(f"{hw_text}: P.{next_start}〜{next_end}")
-                                                            
-                                                next_hw_pages_str = "\n".join(next_hw_pages_list) if next_hw_pages_list else "-"
-                                                selected_hw_text_str = "、".join(selected_hw_texts)
+                                            st.write("🚀 **次回の宿題指示**")
+                                            if is_continuous:
+                                                selected_hw_text_str = str(last_hw_text)
+                                                next_hw_pages_str = str(last_hw_pages)
+                                                st.info(f"🔄 【自動引き継ぎ内容】\n\n📚 テキスト: **{selected_hw_text_str}**\n🎯 範囲: \n{next_hw_pages_str}")
                                             else:
-                                                next_hw_pages_str = "-"
-                                                selected_hw_text_str = "-"
-                                                st.info("👆 テキストを選択するとページ入力欄が表示されます")
-                                                
-                                            st.caption(f"スプレッドシートに保存される範囲:\n{next_hw_pages_str}")
+                                                hw_text_options = ["🆕 新規テキスト入力"] + text_options
+                                                selected_hw_texts = st.multiselect("次回の宿題テキスト (複数可)", hw_text_options, key=f"hw_texts_{b}_{i}")
+
+                                                if "🆕 新規テキスト入力" in selected_hw_texts:
+                                                    new_text_name = st.text_input("新規テキスト名を入力", key=f"new_hw_text_{b}_{i}")
+                                                    if new_text_name:
+                                                        robust_api_call(add_new_textbook, new_text_name)
+                                                        selected_hw_texts.remove("🆕 新規テキスト入力")
+                                                        if new_text_name not in selected_hw_texts:
+                                                            selected_hw_texts.append(new_text_name)
+                                                        cached_get_textbook_master.clear()
+
+                                                next_hw_pages_list = []
+                                                if selected_hw_texts:
+                                                    for t_idx, hw_text in enumerate(selected_hw_texts):
+                                                        st.write(f"📘 **{hw_text}** の宿題")
+                                                        
+                                                        num_ranges = st.number_input(f"【{hw_text}】から出す範囲の数 (飛び石対応)", min_value=1, max_value=5, value=1, key=f"hw_ranges_num_{b}_{i}_{t_idx}")
+                                                        
+                                                        for r_idx in range(num_ranges):
+                                                            n_s_col, n_e_col = st.columns(2)
+                                                            next_start = n_s_col.number_input(f"開始P ({r_idx+1})", min_value=0, value=0, key=f"n_s_{b}_{i}_{t_idx}_{r_idx}")
+                                                            next_end = n_e_col.number_input(f"終了P ({r_idx+1})", min_value=0, value=0, key=f"n_e_{b}_{i}_{t_idx}_{r_idx}")
+                                                            
+                                                            if next_end >= next_start and next_end > 0:
+                                                                next_hw_pages_list.append(f"{hw_text}: P.{next_start}〜{next_end}")
+                                                                
+                                                    next_hw_pages_str = "\n".join(next_hw_pages_list) if next_hw_pages_list else "-"
+                                                    selected_hw_text_str = "、".join(selected_hw_texts)
+                                                else:
+                                                    next_hw_pages_str = "-"
+                                                    selected_hw_text_str = "-"
+                                                    st.info("👆 テキストを選択するとページ入力欄が表示されます")
+                                                    
+                                                st.caption(f"スプレッドシートに保存される範囲:\n{next_hw_pages_str}")
 
                                         st.divider()
-                                        advice = st.text_area("🗣️ 授業でのアドバイス（褒めた点など）", height=80, key=f"advc_{b}_{i}")
-                                        parent_msg = st.text_area("👪 保護者への連絡事項", height=80, key=f"p_msg_{b}_{i}")
-                                        next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{b}_{i}")
+                                        # 🌟 コメントの項目名を体験生と通常生で切り替える
+                                        if is_trial:
+                                            st.write("💬 **体験授業コメント**")
+                                            advice = st.text_area("🌟 生徒の長所・褒めた点", height=80, key=f"advc_{b}_{i}")
+                                            parent_msg = st.text_area("👪 保護者へお伝えしたいこと", height=80, key=f"p_msg_{b}_{i}")
+                                            next_handover = st.text_area("🔄 入塾に向けた課題・特記事項", height=80, key=f"next_h_{b}_{i}")
+                                        else:
+                                            st.write("💬 **コメント事項**")
+                                            advice = st.text_area("🗣️ 授業でのアドバイス（褒めた点など）", height=80, key=f"advc_{b}_{i}")
+                                            parent_msg = st.text_area("👪 保護者への連絡事項", height=80, key=f"p_msg_{b}_{i}")
+                                            next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{b}_{i}")
 
                                         input_data_list.append({
                                             "student_id": student_id, "name": name, "subject": subject, "text_name": text_name_str,
@@ -449,7 +474,8 @@ def render_multi_input_page():
                                             "assigned_p": assigned_p, "completed_p": completed_p, "advanced_p_str": advanced_p_str,
                                             "motivation_rank": motivation_rank, 
                                             "next_hw_text": selected_hw_text_str, 
-                                            "next_hw_pages": next_hw_pages_str
+                                            "next_hw_pages": next_hw_pages_str,
+                                            "is_trial": is_trial # 🌟 追加
                                         })
 
                                         st.divider()
@@ -475,7 +501,8 @@ def render_multi_input_page():
                                                             chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                                         )
                                                 
-                                                if attendance != "欠席（振替なし）" and "欠席" not in attendance:
+                                                # 🌟 体験生の場合は宿題率の更新をスキップ
+                                                if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
                                                     try:
                                                         robust_api_call(update_student_homework_rate, name, subject, assigned_p, completed_p)
                                                     except Exception:
@@ -523,7 +550,8 @@ def render_multi_input_page():
                                         chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                     )
                             
-                            if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"]:
+                            # 🌟 体験生の場合は宿題率の更新をスキップ
+                            if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
                                 try:
                                     robust_api_call(update_student_homework_rate, data["name"], data["subject"], data["assigned_p"], data["completed_p"])
                                 except Exception:
@@ -535,7 +563,7 @@ def render_multi_input_page():
                     
                     all_save_triggered = (b, num_students)
 
-            # 🌟 【新機能】このコマの全員の個別保存が終わったかチェックし、終わっていればリセット処理を発動！
+            # 🌟 このコマの全員の個別保存が終わったかチェックし、終わっていればリセット処理を発動！
             saved_count = sum(1 for idx in range(num_students) if st.session_state.get(f"saved_flag_{b}_{idx}", False))
             if saved_count == num_students and num_students > 0 and not all_save_triggered:
                 st.success("🎉 このコマの全員の入力が完了しました！画面をリセットします...")
