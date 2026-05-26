@@ -62,7 +62,7 @@ def render_word_quiz_maker_page():
         elif quiz_name == "WordCup20問":
             ranges, p_size = ["A1:I23", "J1:R23"], "B5"    
         elif quiz_name == "キクタン32問":
-            ranges, p_size = ["A1:J18", "M1:V18"], "A4"
+            ranges, p_size = ["A1:M18", "N1:Z18"], "A4"
         elif quiz_name == "WordCup100問":
             ranges, p_size = ["A1:AB27", "AC1:BD27"], "A3"
             portrait_val = "false"
