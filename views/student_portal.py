@@ -38,7 +38,7 @@ def render_student_portal_page():
         return
 
     # 🌟 全機能共通の生徒選択バー（ID付きのリストを渡す）
-    selected_student = st.selectbox("👤 対象の生徒を選択してください", ["-- 選択 --"] + student_options)
+    selected_student = st.selectbox("👤 対象の生徒を選択してください", student_options, index=None, placeholder="--選択--")
 
     if is_conference_mode:
         st.sidebar.success("✅ 面談モードON（読取専用）")
@@ -47,7 +47,7 @@ def render_student_portal_page():
         st.sidebar.info("✏️ 通常モード（入力・編集）")
 
     # 🌟 生徒が選ばれていない時の「機能紹介画面」
-    if selected_student == "-- 選択 --":
+    if selected_student is None:
         st.info("👆 上のメニューから生徒を選択すると、以下の個別メニューが利用できます！")
         
         c1, c2 = st.columns(2)
