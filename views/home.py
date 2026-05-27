@@ -78,11 +78,21 @@ def render_home_page():
     # 🌟 掲示板エリア
     # ==========================================
     st.subheader("📌 講師向け 連絡事項")
-    current_message = robust_api_call(load_board_message, fallback_value="")
+    
+    # 🌟 変更: 戻り値が辞書になるため、fallback_valueも辞書型に変更
+    board_data = robust_api_call(load_board_message, fallback_value={"message": "", "updated_at": "---"})
+    current_message = board_data.get("message", "本日の連絡事項はありません。")
+    updated_at = board_data.get("updated_at", "---")
+    
+    # 🌟 追加: メッセージの上に最新の更新日時を小さく表示
+    if updated_at and updated_at != "---":
+        st.caption(f"🕒 最終更新日時: {updated_at}")
+    
     st.info(current_message.replace('\n', '  \n'))
     
     if user_role in ['admin', 'owner', 'head_teacher']:
         with st.expander("✏️ 掲示板を編集"):
+            # 💡 valueには辞書から抜いた文字列（current_message）を渡す
             new_msg = st.text_area("内容を入力", value=current_message, height=100)
             if st.button("💾 掲示板を更新"):
                 with st.spinner("更新中..."):
