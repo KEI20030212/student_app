@@ -4,7 +4,7 @@ import pandas as pd
 import datetime
 import re
 
-# 🌟 変更: 新規登録用に update_student_info もインポートに追加
+# 🌟 新規登録用に update_student_info もインポート
 from utils.g_sheets import get_student_master, get_student_info, update_student_info
 from utils.api_guard import robust_api_call
 
@@ -19,7 +19,7 @@ def render_student_portal_page():
         st.header("🏫 生徒個別ポータル")
         
     with col_toggle:
-        st.markdown("<br>", unsafe_allow_html=True) # スイッチの高さをタイトルと合わせるための微調整
+        st.markdown("<br>", unsafe_allow_html=True) 
         is_conference_mode = st.toggle("👨‍👩‍👦 面談モード", value=False)
         
     if is_conference_mode:
@@ -50,88 +50,104 @@ def render_student_portal_page():
         
         # 🆕 新入生登録フォーム（教室長・管理者のみ表示）
         if st.session_state.get('role') in ['admin', 'owner', 'head_teacher'] and not is_conference_mode:
-            with st.expander("🆕 新入生アカウントを新しく登録する", expanded=False):
-                with st.form("add_new_student_form"):
-                    st.markdown("##### 📝 基本情報の入力")
-                    
-                    # 🌟 自動採番ロジック：既存の最大IDをパースして+1する
-                    if not df_students.empty and '生徒ID' in df_students.columns:
-                        existing_ids = pd.to_numeric(df_students['生徒ID'].astype(str).str.extract(r'(\d+)')[0], errors='coerce').dropna()
-                        next_id = int(existing_ids.max() + 1) if not existing_ids.empty else 1
-                    else:
-                        next_id = 1
-                    
-                    st.caption(f"🤖 生徒IDは自動で振られます ➡ **【 {next_id} 】**")
-                    
-                    new_name = st.text_input("生徒名（必須）", placeholder="例: 山田 太郎")
-                    new_grade = st.text_input("学年", placeholder="例: 中3 / 高1")
-                    
-                    c_ex1, c_ex2 = st.columns(2)
-                    exam_opts = ["", "受験生"]
-                    new_exam = c_ex1.selectbox("🔥 受験区分", exam_opts, index=0)
-                    
-                    school_opts = ["", "公立", "私立・国立"]
-                    new_school_type = c_ex2.selectbox("🏫 学校区分", school_opts, index=0)
-                    
-                    new_school = st.text_input("学校名", placeholder="例: ○○中学校")
-                    new_target = st.text_input("志望校・通塾目的", placeholder="例: ○○高校合格 / 定期テスト対策")
-                    new_subjects = st.text_input("受講科目", placeholder="例: 英語, 数学")
-                    
-                    st.divider()
-                    st.markdown("##### 📋 契約コースの設定 (回数/月)")
-                    cc1, cc2 = st.columns(2)
-                    b_val = cc1.number_input("Bコース", min_value=0, value=0, step=1)
-                    q_val = cc2.number_input("Qコース", min_value=0, value=0, step=1)
-                    
-                    st.divider()
-                    st.markdown("##### 🎯 生徒タイプの初期設定")
-                    type_opts = ["充実", "訓練", "実用", "関係", "自尊", "報酬"]
-                    new_types = st.multiselect("生徒タイプ（複数選択可）", type_opts)
-                    
-                    submit_new_student = st.form_submit_button("🚀 新入生をシステムに登録する", type="primary")
-                    
-                    if submit_new_student:
-                        if not new_name.strip():
-                            st.error("❌ 生徒名を入力してください。")
+            
+            # 🌟 アップグレードポイント：画面更新後も残る「安心の完了メッセージ」
+            if 'flash_success_msg' in st.session_state:
+                st.success(st.session_state['flash_success_msg'])
+                del st.session_state['flash_success_msg'] # 一度表示したら消す
+            
+            # 🌟 アップグレードポイント：フォーム全体を「あとで消せる箱」に入れる
+            form_placeholder = st.empty()
+            
+            with form_placeholder.container():
+                with st.expander("🆕 新入生アカウントを新しく登録する", expanded=False):
+                    with st.form("add_new_student_form"):
+                        st.markdown("##### 📝 基本情報の入力")
+                        
+                        if not df_students.empty and '生徒ID' in df_students.columns:
+                            existing_ids = pd.to_numeric(df_students['生徒ID'].astype(str).str.extract(r'(\d+)')[0], errors='coerce').dropna()
+                            next_id = int(existing_ids.max() + 1) if not existing_ids.empty else 1
                         else:
-                            # 契約コースの文字列結合
-                            course_parts = []
-                            if b_val > 0: course_parts.append(f"Bコース:{b_val}")
-                            if q_val > 0: course_parts.append(f"Qコース:{q_val}")
-                            new_contract_str = "、".join(course_parts)
+                            next_id = 1
+                        
+                        st.caption(f"🤖 生徒IDは自動で振られます ➡ **【 {next_id} 】**")
+                        
+                        new_name = st.text_input("生徒名（必須）", placeholder="例: 山田 太郎")
+                        new_grade = st.text_input("学年", placeholder="例: 中3 / 高1")
+                        
+                        c_ex1, c_ex2 = st.columns(2)
+                        exam_opts = ["", "受験生"]
+                        new_exam = c_ex1.selectbox("🔥 受験区分", exam_opts, index=0)
+                        
+                        school_opts = ["", "公立", "私立・国立"]
+                        new_school_type = c_ex2.selectbox("🏫 学校区分", school_opts, index=0)
+                        
+                        new_school = st.text_input("学校名", placeholder="例: ○○中学校")
+                        new_target = st.text_input("志望校・通塾目的", placeholder="例: ○○高校合格 / 定期テスト対策")
+                        new_subjects = st.text_input("受講科目", placeholder="例: 英語, 数学")
+                        
+                        st.divider()
+                        st.markdown("##### 📋 契約コースの設定 (回数/月)")
+                        cc1, cc2 = st.columns(2)
+                        b_val = cc1.number_input("Bコース", min_value=0, value=0, step=1)
+                        q_val = cc2.number_input("Qコース", min_value=0, value=0, step=1)
+                        
+                        st.divider()
+                        st.markdown("##### 🎯 生徒タイプの初期設定")
+                        type_opts = ["充実", "訓練", "実用", "関係", "自尊", "報酬"]
+                        new_types = st.multiselect("生徒タイプ（複数選択可）", type_opts)
+                        
+                        submit_new_student = st.form_submit_button("🚀 新入生をシステムに登録する", type="primary")
+                    
+            # フォームの「外」で送信判定を行う（これによりフォームごと消す魔法が使える）
+            if submit_new_student:
+                if not new_name.strip():
+                    st.error("❌ 生徒名を入力してください。")
+                else:
+                    course_parts = []
+                    if b_val > 0: course_parts.append(f"Bコース:{b_val}")
+                    if q_val > 0: course_parts.append(f"Qコース:{q_val}")
+                    new_contract_str = "、".join(course_parts)
+                    
+                    new_type_str = "、".join(new_types)
+                    
+                    with st.spinner("スプレッドシートに登録中..."):
+                        def _create_student():
+                            update_student_info(
+                                student_id=str(next_id),
+                                name=new_name.strip(),
+                                grade=new_grade.strip(),
+                                school=new_school.strip(),
+                                target=new_target.strip(),
+                                subjects=new_subjects.strip(),
+                                ability=3,
+                                motivation=3,
+                                naishin=3,
+                                dev_score=50,
+                                hw_rate=100,
+                                exam_status=new_exam,
+                                school_type=new_school_type,
+                                contract_course=new_contract_str,
+                                student_type=new_type_str
+                            )
+                            return True
+                        
+                        success = robust_api_call(_create_student, fallback_value=False)
+                        
+                        if success:
+                            st.cache_data.clear()
                             
-                            # 生徒タイプの文字列結合
-                            new_type_str = "、".join(new_types)
+                            # 🌟 魔法1：登録成功した瞬間に「入力フォーム」を画面から完全に消し去る！
+                            form_placeholder.empty() 
                             
-                            with st.spinner("スプレッドシートに登録中..."):
-                                def _create_student():
-                                    update_student_info(
-                                        student_id=str(next_id),
-                                        name=new_name.strip(),
-                                        grade=new_grade.strip(),
-                                        school=new_school.strip(),
-                                        target=new_target.strip(),
-                                        subjects=new_subjects.strip(),
-                                        ability=3,       # 初期値
-                                        motivation=3,    # 初期値
-                                        naishin=3,       # 初期値
-                                        dev_score=50,    # 初期値
-                                        hw_rate=100,     # 初期値
-                                        exam_status=new_exam,
-                                        school_type=new_school_type,
-                                        contract_course=new_contract_str,
-                                        student_type=new_type_str
-                                    )
-                                    return True
-                                
-                                success = robust_api_call(_create_student, fallback_value=False)
-                                if success:
-                                    st.cache_data.clear()
-                                    st.success(f"🎉 {new_name} さんの新規登録が完了しました！")
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                else:
-                                    st.error("通信エラーにより登録できませんでした。もう一度お試しください。")
+                            # 🌟 魔法2：画面がリロードされた直後に表示するメッセージを仕込む！
+                            st.session_state['flash_success_msg'] = f"🎉 新入生「{new_name}」さんのシステム登録が完了しました！\n上のリストから名前を選択して、詳細データの入力を開始できます。"
+                            
+                            st.success("✅ 登録成功！画面を更新します...")
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            st.error("通信エラーにより登録できませんでした。もう一度お試しください。")
             st.write("")
 
         st.info("👆 上のメニューから生徒を選択すると、以下の個別メニューが利用できます！")
