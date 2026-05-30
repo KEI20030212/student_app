@@ -8,7 +8,7 @@ from utils.g_sheets import (
     update_homework_status, 
     add_school_homework_multi, 
     get_student_master,
-    update_school_homework_detail # 🌟 追加した新関数をインポート
+    update_school_homework_detail 
 )
 
 from utils.api_guard import robust_api_call
@@ -22,8 +22,8 @@ def render_school_homework_page():
             st.cache_data.clear() 
             st.rerun()
             
-    # 🌟 タブを4つに拡張！
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 提出アラート・進捗更新", "➕ 課題の一括登録", "📊 進捗ダッシュボード", "🛠️ 課題の修正・管理"])
+    # 🌟 タブを5つに拡張！
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 提出アラート・進捗更新", "➕ 課題の一括登録", "📊 進捗ダッシュボード", "🛠️ 課題の修正・管理", "📜 過去の課題・履歴検索"])
 
     # ==========================================
     # タブ1：アラート・進捗更新
@@ -139,7 +139,6 @@ def render_school_homework_page():
             
             with st.form("simple_add_form"):
                 
-                # 🌟 追加：年度の自動計算ロジック（4月始まり）
                 current_year = date.today().year
                 if date.today().month < 4:
                     current_year -= 1
@@ -255,7 +254,7 @@ def render_school_homework_page():
                 st.divider()
 
     # ==========================================
-    # 🌟 新設タブ4：🛠️ 課題の修正・管理
+    # タブ4：🛠️ 課題の修正・管理
     # ==========================================
     with tab4:
         st.subheader("🛠️ 登録済み課題の修正")
@@ -269,15 +268,12 @@ def render_school_homework_page():
         elif df_students.empty:
             st.warning("生徒データが読み込めません。")
         else:
-            # 古いデータにも対応できるように空の列を補完
             for col in ['年度', '学期', 'テスト種別']:
                 if col not in df_hw.columns:
                     df_hw[col] = ""
                     
-            # 💡 課題データに生徒マスタの「学校名」「学年」を結合してフィルタリング可能にする
             df_merged = pd.merge(df_hw, df_students[['生徒名', '学校名', '学年']], on='生徒名', how='left')
             
-            # 絞り込み用のUI
             st.markdown("##### 🔍 絞り込み条件")
             c_f1, c_f2 = st.columns(2)
             f_school = c_f1.selectbox("🏫 学校名", ["すべて"] + sorted([s for s in df_merged['学校名'].unique() if str(s) != 'nan' and str(s).strip() != ""]), key="f_sch")
@@ -287,7 +283,6 @@ def render_school_homework_page():
             f_term = c_f3.selectbox("📅 学期", ["すべて"] + sorted([t for t in df_merged['学期'].unique() if str(t) != 'nan' and str(t).strip() != ""]), key="f_term")
             f_test = c_f4.selectbox("🔥 テスト種別", ["すべて"] + sorted([t for t in df_merged['テスト種別'].unique() if str(t) != 'nan' and str(t).strip() != ""]), key="f_test")
             
-            # フィルタリング実行
             filtered_df = df_merged.copy()
             if f_school != "すべて": filtered_df = filtered_df[filtered_df['学校名'] == f_school]
             if f_grade != "すべて": filtered_df = filtered_df[filtered_df['学年'] == f_grade]
@@ -325,7 +320,7 @@ def render_school_homework_page():
                                     with st.spinner("更新中..."):
                                         success = robust_api_call(
                                             update_school_homework_detail,
-                                            row.name + 2, # スプレッドシートの行番号に変換
+                                            row.name + 2, 
                                             edit_subj, edit_task, edit_dead, edit_memo,
                                             fallback_value=False
                                         )
@@ -336,3 +331,86 @@ def render_school_homework_page():
                                             st.rerun()
                                         else:
                                             st.error("❌ 更新エラー")
+
+    # ==========================================
+    # 🌟 新設タブ5：📜 過去の課題・履歴検索
+    # ==========================================
+    with tab5:
+        st.subheader("📜 過去のテスト課題・履歴検索")
+        st.write("過去の定期テスト等で実際に出題された学校の課題範囲を検索し、来年以降の先回りテスト対策に活用できます！")
+
+        df_hw = robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
+        df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+
+        if df_hw.empty or 'APIエラー発生' in df_hw.columns:
+            st.info("検索できる過去の課題データがありません。")
+        elif df_students.empty:
+            st.warning("生徒データが読み込めません。")
+        else:
+            # 古いデータにも対応できるように空の列を補完
+            for col in ['年度', '学期', 'テスト種別']:
+                if col not in df_hw.columns:
+                    df_hw[col] = ""
+
+            df_merged = pd.merge(df_hw, df_students[['生徒名', '学校名', '学年']], on='生徒名', how='left')
+
+            st.markdown("##### 🔍 過去データの検索条件")
+            
+            # 🌟 フォームで囲むことで、ボタンを押すまで再計算が走らないようにする魔法！
+            with st.form("search_past_hw_form"):
+                c_s1, c_s2, c_s3 = st.columns(3)
+                search_school = c_s1.selectbox("🏫 学校名", ["すべて"] + sorted([s for s in df_merged['学校名'].unique() if str(s) != 'nan' and str(s).strip() != ""]))
+                search_grade = c_s2.selectbox("🎯 学年", ["すべて"] + sorted([g for g in df_merged['学年'].unique() if str(g) != 'nan' and str(g).strip() != ""]))
+                search_term = c_s3.selectbox("📅 学期", ["すべて"] + sorted([t for t in df_merged['学期'].unique() if str(t) != 'nan' and str(t).strip() != ""]))
+
+                c_s4, c_s5 = st.columns([1, 2])
+                search_test = c_s4.selectbox("🔥 テスト種別", ["すべて"] + sorted([t for t in df_merged['テスト種別'].unique() if str(t) != 'nan' and str(t).strip() != ""]))
+                search_subj = c_s5.selectbox("📖 教科", ["すべて"] + sorted([s for s in df_merged['教科'].unique() if str(s) != 'nan' and str(s).strip() != ""]))
+
+                # 🌟 検索ボタン！
+                search_clicked = st.form_submit_button("🔍 この条件で過去の課題を検索する", type="primary", use_container_width=True)
+
+            # 🌟 ボタンが押された時だけ結果を表示する
+            if search_clicked:
+                st.divider()
+                
+                with st.spinner("過去のデータを整理中..."):
+                    # フィルタリング実行
+                    filtered_df = df_merged.copy()
+                    if search_school != "すべて": filtered_df = filtered_df[filtered_df['学校名'] == search_school]
+                    if search_grade != "すべて": filtered_df = filtered_df[filtered_df['学年'] == search_grade]
+                    if search_term != "すべて": filtered_df = filtered_df[filtered_df['学期'] == search_term]
+                    if search_test != "すべて": filtered_df = filtered_df[filtered_df['テスト種別'] == search_test]
+                    if search_subj != "すべて": filtered_df = filtered_df[filtered_df['教科'] == search_subj]
+
+                    if filtered_df.empty:
+                        st.info("条件に一致する過去の課題データは見つかりませんでした。")
+                    else:
+                        # 全生徒に配られた重複する課題を綺麗に1つにまとめる
+                        unique_tasks = filtered_df.drop_duplicates(subset=['教科', '課題内容']).copy()
+                        
+                        st.success(f"📚 条件に一致する過去の課題が **{len(unique_tasks)}件** 見つかりました！")
+
+                        # 教務アドバイスの自動生成
+                        total_tasks = len(unique_tasks)
+                        st.markdown("##### 💡 塾長・教室長への教務アドバイス（自動分析）")
+                        if total_tasks > 15:
+                            advice = "⚠️ **課題量が非常に多い傾向にあります。** テスト3週間前から塾での自習を声かけし、学校のワークの1周目を早めに終わらせるスケジュールを組みましょう。"
+                        elif total_tasks > 8:
+                            advice = "📊 **標準的な課題量です。** ただし直前に溜め込むと危険なため、通常授業内で少しずつ学校のワークを進めさせる指示を出してください。"
+                        else:
+                            advice = "🟢 **課題量は比較的少なめ（またはデータ蓄積中）です。** 学校の課題だけでなく、塾専用テキストを使った実践演習に時間を割いて得点アップを狙いましょう。"
+                        
+                        st.info(advice)
+                        st.write("")
+
+                        # 教科ごとにグループ化して綺麗に表示
+                        subjects = unique_tasks['教科'].unique()
+                        for subj in subjects:
+                            st.markdown(f"#### 📘 【{subj}】の過去課題リスト")
+                            subj_tasks = unique_tasks[unique_tasks['教科'] == subj]
+                            
+                            for _, row in subj_tasks.iterrows():
+                                memo_text = f"（メモ: {row['メモ']}）" if str(row['メモ']) != 'nan' and str(row['メモ']).strip() != "" else ""
+                                st.write(f"- {row['課題内容']} {memo_text}")
+                            st.write("")
