@@ -109,13 +109,28 @@ def render_line_report_page():
                     concentration = row.get("集中力", "")
                     reaction = row.get("ミスへの反応", "")
                     attitude = f"集中力: {concentration} / ミスへの反応: {reaction}" if concentration or reaction else "（未入力）"
+
+                    # 🌟 修正：宿題未達成の理由と修正策から「その他: 」を綺麗に切り取る
+                    hw_reason = str(row.get("未達成の理由", "")).strip()
+                    if hw_reason == "nan": hw_reason = ""
+                    if hw_reason.startswith("その他: "):
+                        hw_reason = hw_reason.replace("その他: ", "", 1).strip()
+                        
+                    hw_fix = str(row.get("本日の修正策", "")).strip()
+                    if hw_fix == "nan": hw_fix = ""
+                    if hw_fix.startswith("その他: "):
+                        hw_fix = hw_fix.replace("その他: ", "", 1).strip()
+                    
+                    hw_status_line = ""
+                    if hw_reason or hw_fix:
+                        hw_status_line = f"\n・宿題状況：未達成（理由: {hw_reason} ➡ 対策: {hw_fix}）"
                     
                     advice = str(row.get("授業アドバイス", row.get("アドバイス", ""))).strip()
                     if advice == "nan": advice = ""
                     parent_msg = str(row.get("保護者への連絡", "")).strip()
                     if parent_msg == "nan": parent_msg = ""
 
-                    class_text = f"📅 【授業内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}"
+                    class_text = f"📅 【授業内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                     class_sections.append(class_text)
 
                     if advice:
@@ -226,6 +241,21 @@ def render_line_report_page():
                     concentration = row.get("集中力", "")
                     reaction = row.get("ミスへの反応", "")
                     attitude = f"集中力: {concentration} / ミスへの反応: {reaction}" if concentration or reaction else "（未入力）"
+
+                    # 🌟 修正：体験生側も「その他: 」を綺麗に切り取る
+                    hw_reason = str(row.get("未達成の理由", "")).strip()
+                    if hw_reason == "nan": hw_reason = ""
+                    if hw_reason.startswith("その他: "):
+                        hw_reason = hw_reason.replace("その他: ", "", 1).strip()
+                        
+                    hw_fix = str(row.get("本日の修正策", "")).strip()
+                    if hw_fix == "nan": hw_fix = ""
+                    if hw_fix.startswith("その他: "):
+                        hw_fix = hw_fix.replace("その他: ", "", 1).strip()
+                        
+                    hw_status_line = ""
+                    if hw_reason or hw_fix:
+                        hw_status_line = f"\n・宿題状況：未達成（理由: {hw_reason} ➡ 対策: {hw_fix}）"
                     
                     advice = str(row.get("授業アドバイス", row.get("アドバイス", ""))).strip()
                     if advice == "nan": advice = ""
@@ -234,13 +264,12 @@ def render_line_report_page():
                     next_handover = str(row.get("次回への引継ぎ", "")).strip()
                     if next_handover == "nan": next_handover = ""
 
-                    class_text = f"🎨 【体験内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}"
+                    class_text = f"🎨 【体験内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                     class_sections.append(class_text)
 
                     if advice:
                         advice_sections.append(f"《{teacher}先生より》\n{advice}")
                     if parent_msg or next_handover:
-                        # 保護者への連絡と入塾課題をまとめて表示
                         combined_msg = f"{parent_msg}\n{next_handover}".strip()
                         parent_msg_sections.append(f"《{teacher}先生より》\n{combined_msg}")
 
@@ -267,7 +296,7 @@ def render_line_report_page():
 
 {classes_text}
 
-💯 【小テスト結果】
+💯 【小テスト結果（体験内容）】
 ・{quiz_text}
 
 🗣️ 【本日の輝いていた点・長所】

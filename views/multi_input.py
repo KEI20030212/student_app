@@ -18,7 +18,6 @@ from utils.g_sheets import (
     save_quiz_to_dedicated_sheet,
     get_quiz_master_dict,
     get_type_advice_dict,
-    # 🌟 クラウド下書き機能のインポートを追加
     save_draft_to_sheet,
     load_draft_from_sheet,
     delete_draft_from_sheet
@@ -51,13 +50,14 @@ def cached_get_quiz_master():
 def cached_get_type_advice():
     return robust_api_call(get_type_advice_dict, fallback_value={})
 
-# 🌟 一時保存対象のキー
+# 🌟 一時保存対象のキー (hw_reason, hw_fixを追加)
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
     "adv_start", "adv_end", "num_q", "q_name", "q_chap", "q_score", "w",
     "cont", "hw_forgot", "done_start", "done_end", "conc", "reac", "hw_texts", "new_hw_text", 
-    "n_start", "n_end", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num"
+    "n_start", "n_end", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num",
+    "hw_reason", "hw_fix"
 )
 
 # ==========================================
@@ -148,7 +148,6 @@ def render_multi_input_page():
         st.divider()
         st.warning("🚨 **【重要】離席時の注意**\n\n一定時間でサーバーがスリープします。**入力途中で離席する際は必ず「☁️ 保存」を押してください！**")
 
-    # 🌟 防御：保存データがあるのに気づかず上書き入力してしまうのを防ぐアラート
     if last_saved_time:
         st.error("⚠️ **前回中断した入力データがクラウドに残っています！** 続きから入力する場合は、左メニューの「📂 復元」を先に押してください。")
 
@@ -171,7 +170,6 @@ def render_multi_input_page():
                 quiz_names.append(q_name)
     if not quiz_names:
         quiz_names = ["設定なし"]
-
 
     st.write("### 🗂️ 授業コマの管理")
     num_blocks = st.session_state.get('num_blocks', 1)
@@ -269,7 +267,8 @@ def render_multi_input_page():
                                         "late_time": late_time, "concentration": "-", "reaction": "-",
                                         "advice": "-", "parent_msg": "-", "next_handover": "-",
                                         "assigned_p": 0, "completed_p": 0, "motivation_rank": 0, 
-                                        "next_hw_text": "-", "next_hw_pages": "-", "is_trial": is_trial
+                                        "next_hw_text": "-", "next_hw_pages": "-", "is_trial": is_trial,
+                                        "hw_reason": "", "hw_fix": ""
                                     })
                                 else:
                                     subject = st.selectbox("科目", ["英語", "数学", "国語", "理科", "社会"], index=None, placeholder="科目を選択", key=f"sub_{b}_{i}")
@@ -287,6 +286,8 @@ def render_multi_input_page():
                                         with st.expander("🔍 1. 前回データ確認 ＆ 宿題チェック", expanded=not is_trial):
                                             if is_trial:
                                                 st.info("🔰 体験生モード：前回の引き継ぎ・宿題確認はスキップされます。")
+                                                hw_reason_val = ""
+                                                hw_fix_val = ""
                                             else:
                                                 cache_key = f"prev_data_{name}_{subject}"
                                                 if cache_key not in st.session_state:
@@ -356,11 +357,36 @@ def render_multi_input_page():
                                                             
                                                             if d_end >= d_start and d_end > 0:
                                                                 completed_p += (d_end - d_start + 1)
-                                                    
+                                                        
                                                     st.caption(f"📊 出した宿題: **{assigned_p}** P / やった宿題: **{completed_p}** P")
 
+                                                # 🌟 新規追加：未達成理由と修正策の入力欄
+                                                hw_reason_val = ""
+                                                hw_fix_val = ""
+                                                
+                                                # 宿題が未達成の場合に理由・修正策の欄を表示する
+                                                if (assigned_p > 0 and completed_p < assigned_p) or is_hw_forgotten:
+                                                    st.warning("⚠️ 宿題が未達成です。原因の分析と修正策を記録してください。")
+                                                    r_col1, r_col2 = st.columns(2)
+                                                    
+                                                    with r_col1:
+                                                        reason_sel = st.selectbox("未達成の理由", ["", "難易度(難しかった)", "文量(多かった)", "時間管理(サボり・多忙)", "事故(体調・急用)", "その他"], key=f"hw_reason_sel_{b}_{i}")
+                                                        if reason_sel == "その他":
+                                                            reason_other = st.text_input("理由（その他）", key=f"hw_reason_other_{b}_{i}")
+                                                            hw_reason_val = f"その他: {reason_other}" if reason_other else "その他"
+                                                        else:
+                                                            hw_reason_val = reason_sel
+                                                            
+                                                    with r_col2:
+                                                        fix_sel = st.selectbox("本日の修正策", ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"], key=f"hw_fix_sel_{b}_{i}")
+                                                        if fix_sel == "その他":
+                                                            fix_other = st.text_input("修正策（その他）", key=f"hw_fix_other_{b}_{i}")
+                                                            hw_fix_val = f"その他: {fix_other}" if fix_other else "その他"
+                                                        else:
+                                                            hw_fix_val = fix_sel
+
                                         # ==========================================
-                                        # 📦 アコーディオン2: 今回の進捗と小テスト（メインなので最初から開く）
+                                        # 📦 アコーディオン2: 今回の進捗と小テスト
                                         # ==========================================
                                         with st.expander("📚 2. 今回の授業進捗 ＆ 💯 小テスト", expanded=True):
                                             st.write("📚 **使用テキストと進捗**")
@@ -485,7 +511,7 @@ def render_multi_input_page():
                                                                 
                                                                 if next_end >= next_start and next_end > 0:
                                                                     next_hw_pages_list.append(f"{hw_text}: P.{next_start}〜{next_end}")
-                                                            
+                                                                    
                                                         next_hw_pages_str = "\n".join(next_hw_pages_list) if next_hw_pages_list else "-"
                                                         selected_hw_text_str = "、".join(selected_hw_texts)
                                                     else:
@@ -503,7 +529,7 @@ def render_multi_input_page():
                                                 parent_msg = st.text_area("👪 保護者への連絡事項", height=80, key=f"p_msg_{b}_{i}")
                                                 next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{b}_{i}")
 
-                                        # データ追加と個別保存ボタンはアコーディオンの外、またはステップ3の最下部に配置
+                                        # 🌟 input_data_list に hw_reason と hw_fix を追加
                                         input_data_list.append({
                                             "student_id": student_id, "name": name, "subject": subject, "text_name": text_name_str,
                                             "advanced_p": advanced_p_str, "quiz_records": quiz_records, 
@@ -514,7 +540,9 @@ def render_multi_input_page():
                                             "motivation_rank": motivation_rank, 
                                             "next_hw_text": selected_hw_text_str, 
                                             "next_hw_pages": next_hw_pages_str,
-                                            "is_trial": is_trial
+                                            "is_trial": is_trial,
+                                            "hw_reason": hw_reason_val, # 🌟 追加
+                                            "hw_fix": hw_fix_val        # 🌟 追加
                                         })
 
                                         st.write("")
@@ -529,7 +557,9 @@ def render_multi_input_page():
                                                     next_handover=next_handover, assigned_p=assigned_p, completed_p=completed_p, 
                                                     motivation_rank=motivation_rank, next_hw_text=selected_hw_text_str,
                                                     next_hw_pages=next_hw_pages_str, late_time=late_time,        
-                                                    concentration=concentration or "-", reaction=reaction or "-"            
+                                                    concentration=concentration or "-", reaction=reaction or "-",
+                                                    hw_reason=hw_reason_val, # 🌟 追加
+                                                    hw_fix=hw_fix_val        # 🌟 追加
                                                 )
 
                                                 if quiz_records and len(quiz_records) > 0:
@@ -549,7 +579,6 @@ def render_multi_input_page():
                                                 status.update(label="保存完了！", state="complete", expanded=False)
                                             st.success(f"✅ {name} の記録を保存しました！")
                                             
-                                            # セッションへの保存処理と、次回読み込みのための「last_saved_time」をクリアして事故防止
                                             st.session_state[f"saved_flag_{b}_{i}"] = True
                                             st.session_state[f"saved_name_{b}_{i}"] = name
                                             st.session_state['last_saved_time'] = None 
@@ -579,7 +608,9 @@ def render_multi_input_page():
                                 assigned_p=data.get("assigned_p", 0), completed_p=data.get("completed_p", 0), 
                                 motivation_rank=data.get("motivation_rank", ""), next_hw_text=data.get("next_hw_text", ""),
                                 next_hw_pages=data.get("next_hw_pages", ""), late_time=data.get("late_time", ""),        
-                                concentration=data.get("concentration", ""), reaction=data.get("reaction", "")            
+                                concentration=data.get("concentration", ""), reaction=data.get("reaction", ""),
+                                hw_reason=data.get("hw_reason", ""), # 🌟 追加
+                                hw_fix=data.get("hw_fix", "")        # 🌟 追加
                             )
 
                             if data.get("quiz_records") and len(data["quiz_records"]) > 0:
@@ -625,7 +656,7 @@ def render_multi_input_page():
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
             "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
-            "saved_flag", "saved_name"
+            "saved_flag", "saved_name", "hw_reason", "hw_fix"
         ]
         for i_idx in range(students_count):
             for key in list(st.session_state.keys()):
@@ -645,7 +676,8 @@ def render_multi_input_page():
             "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
-            "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e"
+            "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
+            "hw_reason", "hw_fix"
         ]
         for key in list(st.session_state.keys()):
             for p in target_prefixes:

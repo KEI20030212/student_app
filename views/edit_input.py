@@ -5,9 +5,9 @@ import time
 from utils.g_sheets import (
     get_all_logs, 
     update_lesson_record_in_sheet,
-    load_quiz_records,             # 🌟 追加
-    get_quiz_master_dict,          # 🌟 追加
-    update_quiz_record_in_sheet    # 🌟 追加
+    load_quiz_records,            
+    get_quiz_master_dict,         
+    update_quiz_record_in_sheet   
 )
 from utils.api_guard import robust_api_call
 
@@ -74,10 +74,43 @@ def render_edit_input_page():
                 new_hw_text = st.text_area("📘 次回の宿題テキスト", value=str(record.get('次回の宿題テキスト', '')), height=68)
                 new_hw = st.text_area("🚀 次回の宿題範囲 (P.〇〜〇)", value=str(record.get('次回の宿題ページ数', '')), height=68)
 
+            # 🌟 追加：宿題未達成の理由と修正策の編集UI
+            st.write("⚠️ **宿題未達成の理由と修正策**")
+            c_hw_r1, c_hw_r2 = st.columns(2)
+            
+            reason_opts = ["", "難易度(難しかった)", "文量(多かった)", "時間管理(サボり・多忙)", "事故(体調・急用)", "その他"]
+            fix_opts = ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"]
+            
+            # 既存のデータを取得してインデックスを判定（「その他:〇〇」の場合は「その他」を選択状態にする）
+            curr_reason = str(record.get('未達成の理由', '')).strip()
+            if curr_reason == "nan": curr_reason = ""
+            reason_idx = reason_opts.index(curr_reason) if curr_reason in reason_opts else (5 if curr_reason else 0)
+            
+            curr_fix = str(record.get('本日の修正策', '')).strip()
+            if curr_fix == "nan": curr_fix = ""
+            fix_idx = fix_opts.index(curr_fix) if curr_fix in fix_opts else (5 if curr_fix else 0)
+
+            with c_hw_r1:
+                new_reason_sel = st.selectbox("未達成の理由", reason_opts, index=reason_idx)
+                if new_reason_sel == "その他":
+                    default_reason_other = curr_reason.replace("その他: ", "") if "その他" in curr_reason else curr_reason
+                    new_reason_other = st.text_input("理由（その他）", value=default_reason_other)
+                    final_reason = f"その他: {new_reason_other}" if new_reason_other else "その他"
+                else:
+                    final_reason = new_reason_sel
+
+            with c_hw_r2:
+                new_fix_sel = st.selectbox("本日の修正策", fix_opts, index=fix_idx)
+                if new_fix_sel == "その他":
+                    default_fix_other = curr_fix.replace("その他: ", "") if "その他" in curr_fix else curr_fix
+                    new_fix_other = st.text_input("修正策（その他）", value=default_fix_other)
+                    final_fix = f"その他: {new_fix_other}" if new_fix_other else "その他"
+                else:
+                    final_fix = new_fix_sel
+
             st.divider()
             st.write("💯 **実施した小テストの修正**")
             
-            # 🌟 その生徒がその日に受けた小テストのデータを自動で取得
             df_quizzes = robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
             quiz_details = robust_api_call(get_quiz_master_dict, fallback_value={})
             
@@ -93,7 +126,6 @@ def render_edit_input_page():
                     old_unit = q.get('単元', 1)
                     old_score = q.get('点数', 100)
                     
-                    # 満点の自動計算（multi_inputと同じ魔法）
                     current_max = 100
                     matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{q_name}_")]
                     if matched_marks:
@@ -105,7 +137,6 @@ def render_edit_input_page():
                         new_unit = st.number_input(f"単元/回", value=int(old_unit) if str(old_unit).isdigit() else 1, key=f"edit_q_unit_{q_idx}")
                     with col_q2:
                         safe_old_score = int(old_score) if str(old_score).isdigit() else 0
-                        # 既存の点数が満点を上回っていた場合のエラー防止
                         safe_max = max(current_max, safe_old_score)
                         new_score = st.number_input(f"点数 (/{current_max}点満点)", min_value=0, max_value=safe_max, value=safe_old_score, key=f"edit_q_score_{q_idx}")
                     
@@ -151,7 +182,9 @@ def render_edit_input_page():
                         "ミスへの反応": new_reac,
                         "アドバイス": new_advc,
                         "保護者への連絡": new_pmsg,
-                        "次回への引継ぎ": new_next_h
+                        "次回への引継ぎ": new_next_h,
+                        "未達成の理由": final_reason, # 🌟 追加
+                        "本日の修正策": final_fix    # 🌟 追加
                     }
                     
                     success_main = robust_api_call(
@@ -163,7 +196,6 @@ def render_edit_input_page():
                         fallback_value=False
                     )
 
-                    # 🌟 小テストが変更されていたら、そっちも更新する！
                     for eq in edited_quizzes:
                         if str(eq['old_unit']) != str(eq['new_unit']) or str(eq['old_score']) != str(eq['new_score']):
                             robust_api_call(
