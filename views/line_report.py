@@ -86,6 +86,7 @@ def render_line_report_page():
                 class_sections = []
                 advice_sections = []
                 parent_msg_sections = []
+                bring_sections = [] # 🌟 持ち物用
 
                 for _, row in student_classes.iterrows():
                     teacher = row.get("担当講師", "（未入力）")
@@ -110,7 +111,6 @@ def render_line_report_page():
                     reaction = row.get("ミスへの反応", "")
                     attitude = f"集中力: {concentration} / ミスへの反応: {reaction}" if concentration or reaction else "（未入力）"
 
-                    # 🌟 修正：宿題未達成の理由と修正策から「その他: 」を綺麗に切り取る
                     hw_reason = str(row.get("未達成の理由", "")).strip()
                     if hw_reason == "nan": hw_reason = ""
                     if hw_reason.startswith("その他: "):
@@ -129,6 +129,11 @@ def render_line_report_page():
                     if advice == "nan": advice = ""
                     parent_msg = str(row.get("保護者への連絡", "")).strip()
                     if parent_msg == "nan": parent_msg = ""
+                    
+                    # 🌟 持ち物の抽出
+                    bring = str(row.get("次回の持ち物", "")).strip()
+                    if bring and bring != "nan":
+                        bring_sections.append(f"・{bring}（{subject}）")
 
                     class_text = f"📅 【授業内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                     class_sections.append(class_text)
@@ -141,6 +146,12 @@ def render_line_report_page():
                 classes_text = "\n\n".join(class_sections)
                 advices_text = "\n\n".join(advice_sections) if advice_sections else "（特になし）"
                 msgs_text = "\n\n".join(parent_msg_sections) if parent_msg_sections else "（特になし）"
+                
+                # 🌟 持ち物テキストの組み立て
+                bring_text = ""
+                if bring_sections:
+                    bring_list = "\n".join(bring_sections)
+                    bring_text = f"\n🎒 【次回の持ち物】\n{bring_list}\n"
 
                 # 小テスト結果
                 quiz_text = "小テストは実施していません"
@@ -180,7 +191,7 @@ def render_line_report_page():
 
 💯 【小テスト結果】
 ・{quiz_text}
-{hw_alert_text}
+{hw_alert_text}{bring_text}
 🗣️ 【担当講師より（アドバイス等）】
 {advices_text}
 
@@ -218,6 +229,7 @@ def render_line_report_page():
                 class_sections = []
                 advice_sections = []
                 parent_msg_sections = []
+                bring_sections = [] # 🌟 持ち物用
 
                 for _, row in student_classes.iterrows():
                     teacher = row.get("担当講師", "（未入力）")
@@ -242,7 +254,6 @@ def render_line_report_page():
                     reaction = row.get("ミスへの反応", "")
                     attitude = f"集中力: {concentration} / ミスへの反応: {reaction}" if concentration or reaction else "（未入力）"
 
-                    # 🌟 修正：体験生側も「その他: 」を綺麗に切り取る
                     hw_reason = str(row.get("未達成の理由", "")).strip()
                     if hw_reason == "nan": hw_reason = ""
                     if hw_reason.startswith("その他: "):
@@ -263,6 +274,11 @@ def render_line_report_page():
                     if parent_msg == "nan": parent_msg = ""
                     next_handover = str(row.get("次回への引継ぎ", "")).strip()
                     if next_handover == "nan": next_handover = ""
+                    
+                    # 🌟 持ち物の抽出
+                    bring = str(row.get("次回の持ち物", "")).strip()
+                    if bring and bring != "nan":
+                        bring_sections.append(f"・{bring}（{subject}）")
 
                     class_text = f"🎨 【体験内容】（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                     class_sections.append(class_text)
@@ -276,6 +292,12 @@ def render_line_report_page():
                 classes_text = "\n\n".join(class_sections)
                 advices_text = "\n\n".join(advice_sections) if advice_sections else "（特になし）"
                 msgs_text = "\n\n".join(parent_msg_sections) if parent_msg_sections else "（特になし）"
+                
+                # 🌟 持ち物テキストの組み立て
+                bring_text = ""
+                if bring_sections:
+                    bring_list = "\n".join(bring_sections)
+                    bring_text = f"\n🎒 【次回の持ち物】\n{bring_list}\n"
 
                 # 小テスト結果
                 quiz_text = "小テストは実施していません"
@@ -297,7 +319,7 @@ def render_line_report_page():
 
 💯 【小テスト結果（体験内容）】
 ・{quiz_text}
-
+{bring_text}
 🗣️ 【本日の輝いていた点・長所】
 {advices_text}
 

@@ -73,15 +73,16 @@ def render_edit_input_page():
             with c_txt2:
                 new_hw_text = st.text_area("📘 次回の宿題テキスト", value=str(record.get('次回の宿題テキスト', '')), height=68)
                 new_hw = st.text_area("🚀 次回の宿題範囲 (P.〇〜〇)", value=str(record.get('次回の宿題ページ数', '')), height=68)
+                
+            # 🌟 持ち物の編集欄を追加
+            new_bring = st.text_input("🎒 次回の持ち物", value=str(record.get('次回の持ち物', '')))
 
-            # 🌟 追加：宿題未達成の理由と修正策の編集UI
             st.write("⚠️ **宿題未達成の理由と修正策**")
             c_hw_r1, c_hw_r2 = st.columns(2)
             
             reason_opts = ["", "難易度(難しかった)", "文量(多かった)", "時間管理(サボり・多忙)", "事故(体調・急用)", "その他"]
             fix_opts = ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"]
             
-            # 既存のデータを取得してインデックスを判定（「その他:〇〇」の場合は「その他」を選択状態にする）
             curr_reason = str(record.get('未達成の理由', '')).strip()
             if curr_reason == "nan": curr_reason = ""
             reason_idx = reason_opts.index(curr_reason) if curr_reason in reason_opts else (5 if curr_reason else 0)
@@ -183,8 +184,9 @@ def render_edit_input_page():
                         "アドバイス": new_advc,
                         "保護者への連絡": new_pmsg,
                         "次回への引継ぎ": new_next_h,
-                        "未達成の理由": final_reason, # 🌟 追加
-                        "本日の修正策": final_fix    # 🌟 追加
+                        "未達成の理由": final_reason,
+                        "本日の修正策": final_fix,
+                        "次回の持ち物": new_bring # 🌟 追加
                     }
                     
                     success_main = robust_api_call(
