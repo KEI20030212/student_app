@@ -7,7 +7,8 @@ from utils.g_sheets import (
     load_school_homework_data, 
     update_homework_status, 
     add_school_homework_multi, 
-    get_student_master
+    get_student_master,
+    update_school_homework_detail # 🌟 追加した新関数をインポート
 )
 
 from utils.api_guard import robust_api_call
@@ -18,10 +19,11 @@ def render_school_homework_page():
         st.header("🎒 学校課題管理")
     with col_r:
         if st.button("🔄 情報を更新"):
-            st.cache_data.clear() # 🌟 変更: アプリ全体のキャッシュを安全にクリア
+            st.cache_data.clear() 
             st.rerun()
             
-    tab1, tab2, tab3 = st.tabs(["📋 提出アラート・進捗更新", "➕ 課題の一括登録", "📊 進捗ダッシュボード"])
+    # 🌟 タブを4つに拡張！
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 提出アラート・進捗更新", "➕ 課題の一括登録", "📊 進捗ダッシュボード", "🛠️ 課題の修正・管理"])
 
     # ==========================================
     # タブ1：アラート・進捗更新
@@ -31,7 +33,6 @@ def render_school_homework_page():
         
         df = robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
         
-        # エラーフラグの確認を追加
         if df.empty or 'APIエラー発生' in df.columns:
             st.info("現在、登録されている学校の課題はありません。（または通信エラーによりデータを取得できませんでした）")
         else:
@@ -103,15 +104,15 @@ def render_school_homework_page():
                                     update_success = robust_api_call(update_homework_status, row.name + 2, new_status)
                                     
                                     if update_success:
-                                        st.cache_data.clear() # 🌟 キャッシュクリア
+                                        st.cache_data.clear() 
                                         time.sleep(1)
                                         st.success(f"{row['教科']}の状況を更新しました！")
                                         st.rerun()
                                     else:
                                         st.error("通信エラーのため更新に失敗しました。時間をおいて再試行してください。")
-                        
-                        if row.name != student_tasks.index[-1]:
-                            st.divider()
+                    
+                    if row.name != student_tasks.index[-1]:
+                        st.divider()
 
     # ==========================================
     # タブ2：学校 × 学年 での一括登録
@@ -120,7 +121,6 @@ def render_school_homework_page():
         st.subheader("➕ 学校・学年を指定して一括登録")
         st.info("課題内容を改行して入力すると、一度に複数の課題を登録できます。")
         
-        # 🌟 変更: get_student_master を使用して生徒・学校データを取得
         df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
         
         if df_students.empty:
@@ -138,13 +138,30 @@ def render_school_homework_page():
                 valid_grades = []
             
             with st.form("simple_add_form"):
+                
+                # 🌟 追加：年度の自動計算ロジック（4月始まり）
+                current_year = date.today().year
+                if date.today().month < 4:
+                    current_year -= 1
+                
+                st.markdown("##### 📅 時期・テスト設定")
+                c_y, c_t, c_k = st.columns(3)
+                with c_y:
+                    nendo = st.number_input("年度", value=current_year, step=1)
+                with c_t:
+                    gakki = st.selectbox("学期", ["1学期", "2学期", "3学期", "前期", "後期", "夏休み", "冬休み", "春休み", "その他"])
+                with c_k:
+                    test_type = st.selectbox("期間・種別", ["中間テスト", "期末テスト", "実力テスト", "課題テスト", "長期休み課題", "その他"])
+                
+                st.divider()
+                st.markdown("##### 🏫 ターゲット設定")
+                
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
                     target_school = st.selectbox("🏫 対象の学校名", valid_schools)
                 with col_f2:
                     target_grade = st.selectbox("🎯 対象の学年", valid_grades)
                 
-                # 🌟 指定した学校・学年に一致する生徒の名前をリスト化
                 target_student_list = df_students[
                     (df_students['学校名'] == target_school) & 
                     (df_students['学年'] == target_grade)
@@ -179,14 +196,14 @@ def render_school_homework_page():
                         with st.spinner("一括登録中..."):
                             result = robust_api_call(
                                 add_school_homework_multi, 
-                                target_student_list, subject, task_list, deadline, memo,
+                                nendo, gakki, test_type, target_student_list, subject, task_list, deadline, memo,
                                 fallback_value=(False, "通信エラーが発生しました。時間を置いてお試しください。")
                             )
                             is_success, error_msg = result
                             
                             if is_success:
                                 st.success(f"【{target_school} {target_grade}】の{len(target_student_list)}名に、{len(task_list)}個の課題を登録しました！")
-                                st.cache_data.clear() # 🌟 キャッシュクリア
+                                st.cache_data.clear()
                                 time.sleep(1)
                                 st.rerun()
                             else:
@@ -236,3 +253,86 @@ def render_school_homework_page():
                             
                             st.write(f"- 【{row['教科']}】 {row['課題内容']} {warning} （現在の状態: {row['ステータス']}）")
                 st.divider()
+
+    # ==========================================
+    # 🌟 新設タブ4：🛠️ 課題の修正・管理
+    # ==========================================
+    with tab4:
+        st.subheader("🛠️ 登録済み課題の修正")
+        st.write("登録済みの課題内容や提出期限を後から修正できます。")
+        
+        df_hw = robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
+        df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+        
+        if df_hw.empty or 'APIエラー発生' in df_hw.columns:
+            st.info("修正できる課題データがありません。")
+        elif df_students.empty:
+            st.warning("生徒データが読み込めません。")
+        else:
+            # 古いデータにも対応できるように空の列を補完
+            for col in ['年度', '学期', 'テスト種別']:
+                if col not in df_hw.columns:
+                    df_hw[col] = ""
+                    
+            # 💡 課題データに生徒マスタの「学校名」「学年」を結合してフィルタリング可能にする
+            df_merged = pd.merge(df_hw, df_students[['生徒名', '学校名', '学年']], on='生徒名', how='left')
+            
+            # 絞り込み用のUI
+            st.markdown("##### 🔍 絞り込み条件")
+            c_f1, c_f2 = st.columns(2)
+            f_school = c_f1.selectbox("🏫 学校名", ["すべて"] + sorted([s for s in df_merged['学校名'].unique() if str(s) != 'nan' and str(s).strip() != ""]), key="f_sch")
+            f_grade = c_f2.selectbox("🎯 学年", ["すべて"] + sorted([g for g in df_merged['学年'].unique() if str(g) != 'nan' and str(g).strip() != ""]), key="f_grd")
+            
+            c_f3, c_f4 = st.columns(2)
+            f_term = c_f3.selectbox("📅 学期", ["すべて"] + sorted([t for t in df_merged['学期'].unique() if str(t) != 'nan' and str(t).strip() != ""]), key="f_term")
+            f_test = c_f4.selectbox("🔥 テスト種別", ["すべて"] + sorted([t for t in df_merged['テスト種別'].unique() if str(t) != 'nan' and str(t).strip() != ""]), key="f_test")
+            
+            # フィルタリング実行
+            filtered_df = df_merged.copy()
+            if f_school != "すべて": filtered_df = filtered_df[filtered_df['学校名'] == f_school]
+            if f_grade != "すべて": filtered_df = filtered_df[filtered_df['学年'] == f_grade]
+            if f_term != "すべて": filtered_df = filtered_df[filtered_df['学期'] == f_term]
+            if f_test != "すべて": filtered_df = filtered_df[filtered_df['テスト種別'] == f_test]
+            
+            st.divider()
+            
+            if filtered_df.empty:
+                st.info("条件に一致する課題は見つかりませんでした。")
+            else:
+                students_in_filter = sorted(filtered_df['生徒名'].unique())
+                st.success(f"条件に一致する生徒が {len(students_in_filter)}名 見つかりました。アコーディオンを開いて編集してください。")
+                
+                for student in students_in_filter:
+                    student_tasks = filtered_df[filtered_df['生徒名'] == student]
+                    
+                    with st.expander(f"👤 {student} の課題を修正（{len(student_tasks)}件）", expanded=False):
+                        for idx, row in student_tasks.iterrows():
+                            with st.container(border=True):
+                                c_e1, c_e2, c_e3 = st.columns([2, 3, 2])
+                                edit_subj = c_e1.text_input("教科", value=row.get('教科', ''), key=f"e_subj_{idx}")
+                                edit_task = c_e2.text_input("課題内容", value=row.get('課題内容', ''), key=f"e_task_{idx}")
+                                
+                                try:
+                                    def_date = pd.to_datetime(row.get('提出期限')).date()
+                                except:
+                                    def_date = date.today()
+                                edit_dead = c_e3.date_input("提出期限", value=def_date, key=f"e_dead_{idx}")
+                                
+                                c_e4, c_e5 = st.columns([4, 1])
+                                edit_memo = c_e4.text_input("メモ", value=row.get('メモ', ''), key=f"e_memo_{idx}")
+                                
+                                if c_e5.button("💾 保存", key=f"e_btn_{idx}", use_container_width=True):
+                                    with st.spinner("更新中..."):
+                                        success = robust_api_call(
+                                            update_school_homework_detail,
+                                            row.name + 2, # スプレッドシートの行番号に変換
+                                            edit_subj, edit_task, edit_dead, edit_memo,
+                                            fallback_value=False
+                                        )
+                                        if success:
+                                            st.success("✅ 更新しました！")
+                                            st.cache_data.clear()
+                                            time.sleep(1)
+                                            st.rerun()
+                                        else:
+                                            st.error("❌ 更新エラー")
