@@ -1269,7 +1269,7 @@ def update_homework_status(row_index, new_status):
             time.sleep(2)
     return False
 
-def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
+def add_school_homework_multi(nendo, gakki, test_type, student_list, subject, task_list, deadline, memo):
     """
     複数人の生徒に対し、複数の課題を一括で登録する
     task_list: ['課題1', '課題2', ...] というリスト形式
@@ -1279,8 +1279,9 @@ def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
 
     gc = get_gc_client()
     max_retries = 3
+    
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    deadline_str = deadline.strftime("%Y-%m-%d")
+    deadline_str = deadline.strftime("%Y-%m-%d") if hasattr(deadline, 'strftime') else str(deadline)
     
     # 全生徒 × 全課題 の行データを作成
     rows_to_add = []
@@ -1288,9 +1289,12 @@ def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
         for student in student_list:
             rows_to_add.append([
                 now_str,
+                nendo,
+                gakki,
+                test_type,
                 student,
                 subject,
-                task,      # ここがループで回ってきた各課題
+                task,
                 deadline_str,
                 "未着手",
                 memo
@@ -1308,6 +1312,33 @@ def add_school_homework_multi(student_list, subject, task_list, deadline, memo):
             time.sleep(2)
             
     return False, last_error
+
+def update_school_homework_detail(row_idx, subject, task, deadline, memo):
+    """登録済みの課題内容を上書き修正する関数"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("学校課題管理")
+        
+        # 列名から正確な位置を特定して更新する（安全な方法）
+        headers = ws.row_values(1)
+        col_subj = headers.index("教科") + 1 if "教科" in headers else 2
+        col_task = headers.index("課題内容") + 1 if "課題内容" in headers else 3
+        col_dead = headers.index("提出期限") + 1 if "提出期限" in headers else 4
+        col_memo = headers.index("メモ") + 1 if "メモ" in headers else 6
+        
+        ws.update_cell(row_idx, col_subj, subject)
+        ws.update_cell(row_idx, col_task, task)
+        
+        date_str = deadline.strftime("%Y/%m/%d") if hasattr(deadline, 'strftime') else deadline
+        ws.update_cell(row_idx, col_dead, date_str)
+        ws.update_cell(row_idx, col_memo, memo)
+        
+        return True
+    except Exception as e:
+        print(f"課題詳細の更新エラー: {e}")
+        return False
 
 #search_page.py
 def delete_specific_log(student_id, student_name, date_str, period):
