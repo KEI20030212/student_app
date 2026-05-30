@@ -173,7 +173,7 @@ def render_line_report_page():
 
                 line_message = f"""保護者様
 
-お世話になっております。槌屋個別指導塾の槌屋です。
+お世話になっております。
 本日の {student_name} さんの授業報告をいたします。
 
 {classes_text}
