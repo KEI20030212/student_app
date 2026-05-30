@@ -509,16 +509,12 @@ def get_all_teacher_names():
         st.error(f"🚨 講師マスタの取得に失敗しました！原因: {e}")
         return []
 
-def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
-    # 🌟 生徒IDも表示するようにプリント文をパワーアップ！
+def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, hw_reason="", hw_fix="", next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-"):
     print(f"🌟🌟🌟 保存処理スタート！ ID:{student_id} 生徒名:{name} 🌟🌟🌟") 
     
     gc = get_gc_client()
     try:
         sh = gc.open_by_key(SPREADSHEET_ID)
-        
-        # 🌟 革命ポイント！「授業ログ統合」シートだけを狙い撃ち！
-        # （生徒ごとのシートを探したり作ったりする処理は全カットで超高速化）
         worksheet = sh.worksheet("授業ログ統合")
         
         date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
@@ -526,7 +522,7 @@ def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_r
         # 🚨 超重要ポイント！
         # リストの2番目に「student_id」を追加しました！
         if not quiz_records:
-            worksheet.append_row([date_str, student_id, name, subject, text_name, advanced_p, "-", "-", "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
+            worksheet.append_row([date_str, student_id, name, subject, text_name, advanced_p, "-", "-", "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, hw_reason, hw_fix, next_hw_text, next_hw_pages, late_time, concentration, reaction])
         else:
             for q in quiz_records:
                 worksheet.append_row([date_str, student_id, name, subject, text_name, advanced_p, f"第{q['unit']}章", q['score'], "-", teacher_name, class_type, attendance, class_slot, advice, parent_msg, next_handover, assigned_p, completed_p, motivation_rank, next_hw_text, next_hw_pages, late_time, concentration, reaction])
