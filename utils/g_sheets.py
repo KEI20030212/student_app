@@ -1775,3 +1775,25 @@ def load_fixed_costs():
         
     return pd.DataFrame(worksheet.get_all_records())
 
+def update_fixed_costs_in_sheet(updated_df):
+    """固定費設定シートを上書き更新する関数"""
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        try:
+            ws = sh.worksheet("固定費設定")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title="固定費設定", rows="100", cols="2")
+        
+        ws.clear()
+        if not updated_df.empty:
+            # ヘッダーを追加してデータを書き込む
+            data = [["項目", "金額"]] + updated_df.values.tolist()
+            ws.update("A1", data)
+        else:
+            # データが空になった場合はヘッダーだけ残す
+            ws.update("A1:B1", [["項目", "金額"]])
+        return True
+    except Exception as e:
+        print(f"固定費の更新エラー: {e}")
+        return False
