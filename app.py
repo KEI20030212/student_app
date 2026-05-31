@@ -42,7 +42,7 @@ TEACHER_PASS = "teacher123"
 # 🔒 ログイン画面
 # --------------------------------------------------
 def login_screen():
-    st.markdown("<h1 style='text-align: center; color: #1E90FF;'>🌟 統合管理システム(改良版)</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1E90FF;'>🌟 統合管理システム</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         with st.form("login_form"):
@@ -83,7 +83,7 @@ def main():
     # 全画面共通のヘッダー
     st.markdown(f"""
     <div style="background-color:#1E90FF;padding:10px;border-radius:10px;margin-bottom:20px;">
-        <h2 style="color:white;text-align:center;margin:0;">🌟 統合管理システム(改良版) <span style="font-size:0.5em;background-color:white;color:#1E90FF;padding:2px 8px;border-radius:5px;">{st.session_state['username']} モード</span></h2>
+        <h2 style="color:white;text-align:center;margin:0;">🌟 統合管理システム <span style="font-size:0.5em;background-color:white;color:#1E90FF;padding:2px 8px;border-radius:5px;">{st.session_state['username']} モード</span></h2>
     </div>
     """, unsafe_allow_html=True)
 
