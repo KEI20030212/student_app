@@ -7,7 +7,6 @@ import io
 import unicodedata
 
 from utils.api_guard import robust_api_call
-# 🌟 変更: 個別データ取得関数を全削除し、一括取得関数(get_all_logs)に統一
 from utils.g_sheets import (
     get_all_logs, 
     load_instructor_master, 
@@ -16,15 +15,12 @@ from utils.g_sheets import (
 )
 from utils.pdf_generator import generate_payslip_pdf
 
-# --- 🚀 データ取得を高速化＆保護するキャッシュ関数 ---
-# 🌟 変更: 統合シートから一括で取得する爆速関数に変更
 @st.cache_data(ttl=60, show_spinner="☁️ 授業データを一括取得中...（超高速🚀）")
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
 @st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
-    """講師マスタを取得・キャッシュ"""
     df = robust_api_call(load_instructor_master, fallback_value=pd.DataFrame())
     if df.empty or "講師名" not in df.columns:
         return pd.DataFrame(columns=["講師名", "1:1単価", "1:2単価", "1:3単価", "交通費", "役職手当"])
@@ -33,17 +29,19 @@ def fetch_instructor_master_cached():
 def render_salary_dashboard_page():
     st.header("💰 給与・交通費ダッシュボード")
 
-    # --- 1. データ取得（まずはベースとなるデータを揃える） ---
     df_instructors = fetch_instructor_master_cached()
 
     # --------------------------------------------------------
-    # 🌟 操作パネル（一括データ取得＆ゆらぎ吸収）
+    # 操作パネル（一括データ取得＆ゆらぎ吸収）
     # --------------------------------------------------------
+    if 'toast_msg' in st.session_state:
+        st.toast(st.session_state['toast_msg'], icon="✨")
+        del st.session_state['toast_msg']
+
     df_all = cached_get_all_logs()
     month_options = ["データなし"]
     
     if not df_all.empty and "APIエラー発生" not in df_all.columns and '日時' in df_all.columns:
-        # 🌟 列名の揺れを吸収
         name_col = '名前' if '名前' in df_all.columns else '生徒名'
         df_all = df_all.rename(columns={name_col: '生徒名'})
         
@@ -59,14 +57,13 @@ def render_salary_dashboard_page():
         selected_month = st.selectbox("📅 集計する月を選択", month_options)
     with col_btn:
         if st.button("🔄 給与データを最新に更新", type="primary", use_container_width=True):
-            st.cache_data.clear() # 🌟 アプリ全体のキャッシュをクリアしてリフレッシュ
+            st.cache_data.clear() 
             st.toast("最新データを取得中...", icon="⏳")
             time.sleep(0.5)
             st.rerun()
 
     st.divider()
 
-    # --- 📋 メインコンテンツ（タブ分け） ---
     tab_calc, tab_master = st.tabs(["📊 給与計算・明細発行", "👨‍🏫 講師単価・設定変更"])
 
     # ==========================================
@@ -76,10 +73,8 @@ def render_salary_dashboard_page():
         if df_all.empty or selected_month == "データなし":
             st.info("集計対象のデータがありません。")
         else:
-            # --- 給与計算ロジック ---
             df_month = df_all[df_all['年月'] == selected_month].copy()
             df_month['担当講師'] = df_month['担当講師'].astype(str)
-            # 複数講師が担当した場合（コンマ区切り等）を分割して行を増やす
             df_month_exploded = df_month.assign(担当講師=df_month['担当講師'].str.split(r'[\n,、]')).explode('担当講師')
             df_month_exploded['担当講師'] = df_month_exploded['担当講師'].str.strip()
             
@@ -94,13 +89,10 @@ def render_salary_dashboard_page():
             for teacher in valid_teachers:
                 df_teacher = df_month_exploded[df_month_exploded['担当講師'] == teacher].copy()
                 df_teacher['日付'] = df_teacher['日時'].dt.date
-                
-                # 🌟 同じ日・同じコマに複数生徒を教えている場合（1:2や1:3）の重複を排除して「1コマ」としてカウント
                 df_teacher = df_teacher.drop_duplicates(subset=['日付', '授業コマ'])
 
                 t_row_df = df_instructors[df_instructors["講師名"] == teacher]
                 if t_row_df.empty:
-                    # マスタにいない場合はデフォルト値
                     p11, p12, p13, trans, allowance = 1500, 1800, 2000, 0, 0
                 else:
                     t_row = t_row_df.iloc[0]
@@ -157,7 +149,6 @@ def render_salary_dashboard_page():
     with tab_master:
         st.subheader("⚙️ 講師マスタの設定変更")
         
-        # --- 1. 一人ずつ設定変更フォーム ---
         st.markdown("##### 👤 講師ごとの個別設定")
         target_teacher = st.selectbox("設定を変更する講師を選択してください", ["選択してください"] + df_instructors["講師名"].tolist())
         
@@ -184,24 +175,15 @@ def render_salary_dashboard_page():
                     
                     with st.spinner("☁️ 保存中..."):
                         if robust_api_call(update_instructor_master, df_instructors, fallback_value=False):
-                            st.cache_data.clear() # 🌟 保存後にキャッシュを消去
-                            st.success(f"✅ {target_teacher} 先生の設定を更新しました！")
-                            time.sleep(1)
+                            st.cache_data.clear() 
+                            st.session_state['toast_msg'] = f"✅ {target_teacher} 先生の給料・手当設定を更新しました！"
                             st.rerun()
         
         st.divider()
         
-        # --- 2. 講師マスタ一覧表示（閲覧用） ---
         st.markdown("##### 📋 講師設定一覧（確認用）")
         st.dataframe(df_instructors, hide_index=True, use_container_width=True)
         
-        with st.expander("➕ 新しい講師を登録する（手動追加）"):
-            with st.form("add_teacher_form"):
-                new_name = st.text_input("講師名")
-                if st.form_submit_button("新規登録"):
-                    if new_name and new_name not in df_instructors["講師名"].tolist():
-                        new_row = pd.DataFrame([{"講師名": new_name, "1:1単価": 1500, "1:2単価": 1800, "1:3単価": 2000, "交通費": 0, "役職手当": 0}])
-                        updated_df = pd.concat([df_instructors, new_row], ignore_index=True)
-                        robust_api_call(update_instructor_master, updated_df)
-                        st.cache_data.clear()
-                        st.rerun()
+        # 🌟 変更：手動追加による名前ズレ事故を根本から防止するための親切なアナウンス欄に変更
+        with st.expander("➕ 新しい講師を登録する（アカウント連動）"):
+            st.info("💡 **一元管理へのアップデート**\n\n「名前の入力ミス」や「データの二重管理」を完璧に防ぐため、新しい講師の登録は左メニューの **「⚙️ アカウント・システム設定」** から行ってください。\n\nそちらでアカウントを作成すると、自動的にこの講師マスタにも連動して、初期給与設定の枠が自動生成されます！")
