@@ -1234,6 +1234,45 @@ def delete_quiz_maker_sheet(test_name):
     if cell: ws.delete_rows(cell.row)
     st.cache_data.clear()
 
+#student_portal.py
+def move_student_to_inactive_sheet(student_id):
+    """現役の生徒情報を退塾生用シートに移動し、現役名簿から削除する"""
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        
+        # 1. 現役生シートから該当生徒のデータを取得
+        ws_active = sh.worksheet("設定_生徒情報")
+        records = ws_active.get_all_records()
+        
+        row_idx = None
+        student_data = None
+        for i, row in enumerate(records):
+            if str(row.get("生徒ID")).strip() == str(student_id).strip():
+                row_idx = i + 2 # ヘッダー分+1、インデックス0始まり分+1
+                student_data = list(row.values())
+                break
+                
+        if not row_idx or not student_data:
+            return False, "対象の生徒データが見つかりませんでした。"
+            
+        # 2. 退塾生用シート（なければ自動作成）にデータを追加
+        try:
+            ws_inactive = sh.worksheet("退塾生情報")
+        except gspread.exceptions.WorksheetNotFound:
+            # 既存の列構成と同じ幅で作成
+            headers = ws_active.row_values(1)
+            ws_inactive = sh.add_worksheet(title="退塾生情報", rows="500", cols=str(len(headers)))
+            ws_inactive.append_row(headers)
+            
+        ws_inactive.append_row(student_data)
+        
+        # 3. 現役生シートから行を完全に削除
+        ws_active.delete_rows(row_idx)
+        return True, "成功"
+    except Exception as e:
+        return False, str(e)
+
 #school_homework.py
 @st.cache_data(ttl=60) # 短めのキャッシュでリアルタイム性を確保
 def load_school_homework_data():
