@@ -97,7 +97,7 @@ def render_account_manager_page():
                         
                         # 重複登録を防ぎつつ追記
                         if new_name.strip() not in df_instructors["講師名"].tolist():
-                            new_row = pd.DataFrame([{"講師名": new_name.strip(), "1:1単価": 1500, "1:2単価": 1800, "1:3単価": 2000, "交通費": 0, "役職手当": 0}])
+                            new_row = pd.DataFrame([{"講師名": new_name.strip(), "1:1単価": 1875, "1:2単価": 1950, "1:3単価": 2100, "交通費": 0, "役職手当": 0}])
                             updated_df = pd.concat([df_instructors, new_row], ignore_index=True)
                             update_instructor_master(updated_df)
                         return True
