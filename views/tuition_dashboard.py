@@ -34,7 +34,7 @@ def render_tuition_dashboard_page():
     df_students = cached_get_student_master()
     price_master = cached_load_price_master()
     
-    # 🌟 ゆらぎ補正 (新しく追加した「コース」列も補正対象に！)
+    # 🌟 ゆらぎ補正
     if not price_master.empty and '学年' in price_master.columns and 'コマ数' in price_master.columns:
         price_master['学年'] = price_master['学年'].astype(str).apply(lambda x: unicodedata.normalize('NFKC', x).strip())
         price_master['コマ数'] = pd.to_numeric(price_master['コマ数'], errors='coerce').fillna(0).astype(int)
@@ -93,7 +93,6 @@ def render_tuition_dashboard_page():
 
     st.subheader(f"👤 {selected_month} の請求設定")
     
-    # 🌟 管理費の入力欄と、再計算チェックボックスを横並びで配置
     c_fee1, c_fee2 = st.columns(2)
     global_admin_fee = c_fee1.number_input("🏢 今月の管理費・諸経費（一律加算）", min_value=0, value=3300, step=100)
     force_recalc = c_fee2.checkbox("🔄 過去の保存データを無視して、強制的に再計算する")
@@ -131,85 +130,79 @@ def render_tuition_dashboard_page():
             try:
                 saved_extra_count = int(next((row[c] for c in saved_billing_df.columns if "追加コマ" in c), 0))
                 discount_koma = int(next((row[c] for c in saved_billing_df.columns if "割引コマ" in c), discount_koma))
-                # 🌟 保存データの中に管理費があればそれを優先、なければさっき入力した一律の額
                 saved_admin_fee = int(next((row[c] for c in saved_billing_df.columns if "管理費" in c), global_admin_fee))
             except:
                 saved_admin_fee = global_admin_fee
         else:
             saved_admin_fee = global_admin_fee
 
-        # 🤖 【新機能】複数コースを自動パースして計算する超賢いロジック
         course_list = []
         if course and course != "未設定":
-            # "Bコース:4, Qコース:4" のような文字列をカンマや読点で分割
             for part in course.replace('、', ',').replace('＋', ',').replace('+', ',').split(','):
                 part = part.strip()
                 if not part: continue
                 
-                # 数字（コマ数）を取り出す
                 nums = re.findall(r'\d+', part)
                 if nums:
                     koma = int(nums[0])
-                    # 数字以外の部分（コース名）を取り出す（「:」や「-」は除去）
                     name_match = re.match(r'^([^0-9:：\-]+)', part)
                     c_name = name_match.group(1).strip() if name_match else "未設定"
                     course_list.append({"name": c_name, "koma": koma})
 
         total_base_price = 0
         total_base_koma = 0
-        max_extra_unit_price = 0 # 複数コースを受講している場合、追加コマは一番高い単価を採用する
+        max_extra_unit_price = 0 
         
-        # コースごとに料金マスタを検索して合算
         if course_list:
             for c in course_list:
                 c_name = c["name"]
                 c_koma = c["koma"]
                 
-                # 🌟 1. まずは「必須条件（学年・コマ数・コース・学校区分）」だけで絞り込む
-                base_mask = (price_master['学年'] == grade) & (price_master['コマ数'] == c_koma)
+                # 🌟 【超重要アップデート】「コマ数」を検索条件から除外！
+                # 学年、コース、学校区分 だけでマスタのベース行を探す
+                base_mask = (price_master['学年'] == grade)
                 if 'コース' in price_master.columns and c_name != "未設定":
                     base_mask &= (price_master['コース'] == c_name)
                 if '学校区分' in price_master.columns: 
-                    # 学校区分は完全一致、またはマスタ側が空欄ならOKとする柔軟設定
                     base_mask &= ((price_master['学校区分'] == school_type) | (price_master['学校区分'] == ""))
                 
-                # 🌟 2. 必須条件をクリアしたグループの中で「受験区分」も完全一致するかチェック
+                # 受験区分のチェック
                 perfect_mask = base_mask.copy()
                 if '受験区分' in price_master.columns:
                     perfect_mask &= (price_master['受験区分'] == exam_status)
                 
                 match_df = price_master[perfect_mask]
                 
-                # 🌟 3. もし完全一致がなければ、必須条件のみクリアした（受験区分違いの）データを採用！
                 if match_df.empty:
                     match_df = price_master[base_mask]
                 
                 if not match_df.empty:
-                    total_base_price += int(match_df.iloc[0]['料金'])
+                    # 🌟 1コマあたりの「単価」を特定する（追加単価があれば採用、なければ料金÷コマ数）
+                    if '追加単価' in match_df.columns and not pd.isna(match_df.iloc[0]['追加単価']):
+                        unit_price = int(match_df.iloc[0]['追加単価'])
+                    else:
+                        master_koma = int(match_df.iloc[0]['コマ数']) if int(match_df.iloc[0]['コマ数']) > 0 else 1
+                        unit_price = int(int(match_df.iloc[0]['料金']) / master_koma)
+                        
+                    # 🌟 単価 × 契約コマ数 で基本料金を算出！
+                    calculated_base = unit_price * c_koma
+                    
+                    total_base_price += calculated_base
                     total_base_koma += c_koma
                     
-                    # 追加単価を取得（複数の場合は一番高いものを記憶）
-                    extra_price = int(match_df.iloc[0]['追加単価'])
-                    if extra_price > max_extra_unit_price:
-                        max_extra_unit_price = extra_price
+                    if unit_price > max_extra_unit_price:
+                        max_extra_unit_price = unit_price
                 else:
-                    missing_master_warnings.append(f"{student} さん ({c_name} {c_koma}コマ / 学年: {grade})")
-                    total_base_koma += c_koma # マスタになくても契約コマ数としては合算しておく（追加コマの暴走防止）
+                    missing_master_warnings.append(f"{student} さん ({c_name} / 学年: {grade})")
+                    total_base_koma += c_koma 
         else:
-            # コースが設定されていない、またはうまく読み取れなかった場合
             total_base_price = 0
             total_base_koma = 0
 
-        # 追加コマの計算（実際の受講数 - すべてのコースの合計契約コマ数）
         actual_extra_count = max(0, actual_koma - total_base_koma)
-        
-        # 割引の計算
         discount_amount = discount_koma * max_extra_unit_price
         
-        # 最終的な授業料（基本料金の合算 ＋ 追加コマ代 ➖ 割引）
         tuition_price = max(0, total_base_price + (actual_extra_count * max_extra_unit_price) - discount_amount)
-        
-        # 🌟 授業料 ＋ 管理費 ＝ 最終的な請求額！
         calculated_price = tuition_price + saved_admin_fee
 
         if force_recalc:
@@ -230,7 +223,7 @@ def render_tuition_dashboard_page():
             "📝 実際の受講数": actual_koma,
             "➕ 追加コマ": actual_extra_count,
             "🉐 割引コマ": discount_koma, 
-            "🏢 管理費": final_admin_fee,  # 🌟 管理費の列を追加！
+            "🏢 管理費": final_admin_fee,  
             "💴 今月の請求額 (円)": int(price)
         })
     
