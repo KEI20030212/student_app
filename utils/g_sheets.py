@@ -1470,6 +1470,51 @@ def get_sent_messages(sender_id):
     except Exception as e:
         return []
 
+#line_report.py
+def get_sent_list(date_str):
+    """特定の日の送信済み生徒IDリストを取得する"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        try:
+            ws = sh.worksheet("送信済み履歴")
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title="送信済み履歴", rows="1000", cols="2")
+            ws.update("A1:B1", [["日付", "生徒ID"]])
+            return []
+        
+        records = ws.get_all_records()
+        return [str(r["生徒ID"]) for r in records if str(r["日付"]) == date_str]
+    except:
+        return []
+
+def update_sent_flag(date_str, student_id, is_sent):
+    """送信済みフラグをスプレッドシートに保存/削除する"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("送信済み履歴")
+        records = ws.get_all_records()
+        
+        # 既存の行を探す
+        row_idx = None
+        for i, r in enumerate(records):
+            if str(r["日付"]) == date_str and str(r["生徒ID"]) == str(student_id):
+                row_idx = i + 2
+                break
+        
+        if is_sent and not row_idx:
+            # チェックされたが履歴にない場合は追加
+            ws.append_row([date_str, str(student_id)])
+        elif not is_sent and row_idx:
+            # チェックが外されたが履歴にある場合は削除
+            ws.delete_rows(row_idx)
+        return True
+    except:
+        return False
+
 #my_salary.py
 @st.cache_data(ttl=600)
 def load_published_salary():
