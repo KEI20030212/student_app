@@ -6,3 +6,5 @@ altair
 oauth2client
 reportlab
 pypdf
+google-api-python-client
+google-auth
