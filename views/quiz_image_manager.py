@@ -14,16 +14,30 @@ def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
 def process_image_quality(file_bytes):
-    """画質補正を行わず、最高画質（劣化なし）を維持してJPEGに統一する安全関数"""
+    """文字が読める画質をキープしたまま、サイズを適正化して超軽量化する関数"""
     try:
         img = Image.open(io.BytesIO(file_bytes))
         
         if img.mode != 'RGB':
             img = img.convert('RGB')
 
+        # 🌟 【新機能】自動リサイズ（長辺を最大1600ピクセルに制限）
+        # A4の文字をくっきり残しつつ、データ量を1/10以下に激減させます
+        max_size = 1600
+        width, height = img.size
+        if max(width, height) > max_size:
+            if width > height:
+                new_width = max_size
+                new_height = int(height * (max_size / width))
+            else:
+                new_height = max_size
+                new_width = int(width * (max_size / height))
+            # 高品質な補間フィルター（LANCZOS）で文字の潰れを防止
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
         out_buf = io.BytesIO()
-        # 🌟 画質劣化をゼロ（品質100%、色にじみなし）にして保存
-        img.save(out_buf, format="JPEG", quality=100, subsampling=0)
+        # 🌟 保存時の品質を実用上最強の「90%」に調整（100%に比べてファイルサイズが劇的に軽くなります）
+        img.save(out_buf, format="JPEG", quality=90, subsampling=0)
         return out_buf.getvalue(), "image/jpeg"
     except Exception as e:
         return file_bytes, None
@@ -52,7 +66,6 @@ def render_quiz_image_manager_page():
 
     st.info("💡 **アップロードのコツ:** スマホ標準のカメラアプリでピントを合わせて綺麗に撮影し、以下の枠からアップロードしてください。複数枚まとめて選択できます！")
 
-    # 🌟 変更ポイント：accept_multiple_files=True で複数枚対応に！
     uploaded_files = st.file_uploader(
         "📂 写真ファイルを選択してください (複数選択可・JPG / PNG)", 
         type=["jpg", "jpeg", "png"], 
@@ -60,7 +73,7 @@ def render_quiz_image_manager_page():
         key=f"files_{student_id}"
     )
 
-    if uploaded_files: # ファイルが1枚以上選ばれたら
+    if uploaded_files:
         st.success(f"📸 {len(uploaded_files)} 枚の画像が選択されています。")
         
         with st.container(border=True):
@@ -71,7 +84,6 @@ def render_quiz_image_manager_page():
             
             if st.button("🚀 この設定でGoogle Driveへ一括保存する", type="primary", use_container_width=True):
                 
-                # 🌟 プログレスバー（進捗ゲージ）を準備
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
@@ -79,23 +91,18 @@ def render_quiz_image_manager_page():
                 now_date = datetime.date.today().strftime("%Y%m%d")
                 suffix_str = f"_{title_suffix}" if title_suffix.strip() else ""
                 
-                # 🌟 ループで1枚ずつ処理・アップロードしていく
                 for i, u_file in enumerate(uploaded_files):
-                    status_text.text(f"☁️ アップロード中... ({i+1}/{len(uploaded_files)}枚目)")
+                    status_text.text(f"⚡ 画像を軽量化して送信中... ({i+1}/{len(uploaded_files)}枚目)")
                     
                     file_bytes = u_file.getvalue()
-                    mime_type = u_file.type
                     
-                    # 最高画質データに変換
+                    # 🌟 読み込み時に自動で適切なサイズにリサイズ・軽量化
                     file_bytes, new_mime = process_image_quality(file_bytes)
-                    if new_mime:
-                        mime_type = new_mime
+                    mime_type = new_mime if new_mime else u_file.type
                     
-                    # 複数枚の場合はファイル名のお尻に「_1」「_2」と連番をつける
                     seq_str = f"_{i+1}" if len(uploaded_files) > 1 else ""
                     file_name = f"{now_date}_{subj}{suffix_str}{seq_str}.jpg"
 
-                    # ドライブへ保存
                     success, result = robust_api_call(
                         upload_image_to_drive,
                         student_id=student_id,
@@ -111,14 +118,12 @@ def render_quiz_image_manager_page():
                     else:
                         st.error(f"❌ 【{file_name}】の保存に失敗しました: {result}")
                         
-                    # 進捗ゲージを更新
                     progress_bar.progress((i + 1) / len(uploaded_files))
                 
-                # 処理完了後の表示
                 status_text.empty()
                 if success_count > 0:
-                    st.success(f"✅ {success_count} 枚の画像を保存完了しました！LINEレポートのURLにも自動反映されます。")
-                    time.sleep(2)
+                    st.success(f"✅ {success_count} 枚の画像をサクサク保存完了しました！")
+                    time.sleep(1.5)
                     st.rerun()
 
     # ==========================================
@@ -131,7 +136,7 @@ def render_quiz_image_manager_page():
         images = robust_api_call(list_student_images, student_id, student_name, fallback_value=[])
 
     if not images:
-        st.info("まだこの生徒のフォルダに写真はありません。上のフォームから最初の1枚を登録してみましょう！")
+        st.info("まだこの生徒のフォルダに写真はありません。")
     else:
         st.caption("💡 新しい写真から順番に並んでいます。画像下のリンクをクリックするとGoogle Drive上で原寸大の確認が可能です。")
         
@@ -146,7 +151,6 @@ def render_quiz_image_manager_page():
                     if c_time:
                         try:
                             dt = datetime.datetime.strptime(c_time, "%Y-%m-%dT%H:%M:%S.%fZ")
-                            # JSTに変換して表示（+9時間）
                             dt_jst = dt + datetime.timedelta(hours=9)
                             st.caption(f"📅 {dt_jst.strftime('%Y/%m/%d %H:%M')}")
                         except:
