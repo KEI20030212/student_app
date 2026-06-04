@@ -50,33 +50,52 @@ def render_quiz_image_manager_page():
     st.divider()
     st.subheader(f"✍️ {student_name} さんの小テスト・ノート登録")
 
-    st.info("💡 **アップロードのコツ:** スマホ標準のカメラアプリでピントを合わせて綺麗に撮影し、以下の枠からアップロードしてください。")
+    st.info("💡 **アップロードのコツ:** スマホ標準のカメラアプリでピントを合わせて綺麗に撮影し、以下の枠からアップロードしてください。複数枚まとめて選択できます！")
 
-    # ファイルアップローダーのみのシンプルなUI
-    uploaded_file = st.file_uploader("📂 写真ファイルを選択してください (JPG / PNG)", type=["jpg", "jpeg", "png"], key=f"file_{student_id}")
+    # 🌟 変更ポイント：accept_multiple_files=True で複数枚対応に！
+    uploaded_files = st.file_uploader(
+        "📂 写真ファイルを選択してください (複数選択可・JPG / PNG)", 
+        type=["jpg", "jpeg", "png"], 
+        accept_multiple_files=True, 
+        key=f"files_{student_id}"
+    )
 
-    if uploaded_file is not None:
-        file_bytes = uploaded_file.getvalue()
-        mime_type = uploaded_file.type
-        
-        with st.spinner("✨ 画像を最高画質データに変換中..."):
-            file_bytes, new_mime = process_image_quality(file_bytes)
-            if new_mime:
-                mime_type = new_mime
-        
-        now_date = datetime.date.today().strftime("%Y%m%d")
+    if uploaded_files: # ファイルが1枚以上選ばれたら
+        st.success(f"📸 {len(uploaded_files)} 枚の画像が選択されています。")
         
         with st.container(border=True):
-            st.markdown("**🏷️ 保存するファイルの設定**")
+            st.markdown("**🏷️ 保存するファイルの設定（選択した全画像に適用されます）**")
             c_meta1, c_meta2 = st.columns(2)
             subj = c_meta1.selectbox("教科", ["英語", "数学", "国語", "理科", "社会", "その他"], key=f"meta_sub_{student_id}")
             title_suffix = c_meta2.text_input("補足名 (任意)", placeholder="単元名やテスト名（例: 二次関数）", key=f"meta_title_{student_id}")
             
-            suffix_str = f"_{title_suffix}" if title_suffix.strip() else ""
-            file_name = f"{now_date}_{subj}{suffix_str}.jpg"
+            if st.button("🚀 この設定でGoogle Driveへ一括保存する", type="primary", use_container_width=True):
+                
+                # 🌟 プログレスバー（進捗ゲージ）を準備
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                success_count = 0
+                now_date = datetime.date.today().strftime("%Y%m%d")
+                suffix_str = f"_{title_suffix}" if title_suffix.strip() else ""
+                
+                # 🌟 ループで1枚ずつ処理・アップロードしていく
+                for i, u_file in enumerate(uploaded_files):
+                    status_text.text(f"☁️ アップロード中... ({i+1}/{len(uploaded_files)}枚目)")
+                    
+                    file_bytes = u_file.getvalue()
+                    mime_type = u_file.type
+                    
+                    # 最高画質データに変換
+                    file_bytes, new_mime = process_image_quality(file_bytes)
+                    if new_mime:
+                        mime_type = new_mime
+                    
+                    # 複数枚の場合はファイル名のお尻に「_1」「_2」と連番をつける
+                    seq_str = f"_{i+1}" if len(uploaded_files) > 1 else ""
+                    file_name = f"{now_date}_{subj}{suffix_str}{seq_str}.jpg"
 
-            if st.button("🚀 この設定でGoogle Driveへ保存する", type="primary", use_container_width=True):
-                with st.spinner(f"【{file_name}】をアップロード中..."):
+                    # ドライブへ保存
                     success, result = robust_api_call(
                         upload_image_to_drive,
                         student_id=student_id,
@@ -88,11 +107,19 @@ def render_quiz_image_manager_page():
                     )
                     
                     if success:
-                        st.success(f"✅ 保存完了しました！LINEレポート機能にも自動でリンクが追加されます。")
-                        time.sleep(2)
-                        st.rerun()
+                        success_count += 1
                     else:
-                        st.error(f"❌ アップロードに失敗しました: {result}")
+                        st.error(f"❌ 【{file_name}】の保存に失敗しました: {result}")
+                        
+                    # 進捗ゲージを更新
+                    progress_bar.progress((i + 1) / len(uploaded_files))
+                
+                # 処理完了後の表示
+                status_text.empty()
+                if success_count > 0:
+                    st.success(f"✅ {success_count} 枚の画像を保存完了しました！LINEレポートのURLにも自動反映されます。")
+                    time.sleep(2)
+                    st.rerun()
 
     # ==========================================
     # 🖼️ 過去の答案ギャラリー表示セクション
