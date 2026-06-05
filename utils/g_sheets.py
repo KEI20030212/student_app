@@ -1301,8 +1301,8 @@ def update_homework_status(row_index, new_status):
         try:
             sh = gc.open_by_key(SPREADSHEET_ID)
             ws = sh.worksheet("学校課題管理")
-            # ステータス列（F列 = 6番目）を更新
-            ws.update_cell(row_index, 6, new_status)
+            # ステータス列（I列 = 9番目）を更新
+            ws.update_cell(row_index, 9, new_status)
             return True
         except Exception:
             time.sleep(2)
