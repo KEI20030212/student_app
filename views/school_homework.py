@@ -73,46 +73,78 @@ def render_school_homework_page():
                     header_icon = "🟢 進行中"
 
                 with st.expander(f"👤 {student} （未提出: {len(student_tasks)}件） - {header_icon}"):
-                    for idx, row in student_tasks.iterrows():
-                        days_left = (row["提出期限"] - today).days
+                    # 🌟 変更ポイント：生徒まるごと1つのフォームにする！
+                    with st.form(key=f"form_student_{student}", border=False):
+                        update_targets = []
                         
-                        if row["ステータス"] == "完了":
-                            status_label = "🟦 【提出確認】学校に出しましたか？"
-                        elif days_left < 0:
-                            status_label = f"🔴 【期限超過！】 {abs(days_left)}日経過"
-                        elif days_left <= 2:
-                            status_label = f"🟡 【期限直前】 あと{days_left}日"
-                        else:
-                            status_label = f"🟢 あと{days_left}日"
+                        for idx, row in student_tasks.iterrows():
+                            days_left = (row["提出期限"] - today).days
+                            
+                            if row["ステータス"] == "完了":
+                                status_label = "🟦 【提出確認】学校に出しましたか？"
+                            elif days_left < 0:
+                                status_label = f"🔴 【期限超過！】 {abs(days_left)}日経過"
+                            elif days_left <= 2:
+                                status_label = f"🟡 【期限直前】 あと{days_left}日"
+                            else:
+                                status_label = f"🟢 あと{days_left}日"
 
-                        st.markdown(f"**【{row['教科']}】 {row['課題内容']}**")
-                        st.caption(f"📅 期限: {row['提出期限']} | 📝 メモ: {row['メモ']} | {status_label}")
+                            col_t, col_s = st.columns([0.7, 0.3])
+                            with col_t:
+                                st.markdown(f"**【{row['教科']}】 {row['課題内容']}**")
+                                st.caption(f"📅 期限: {row['提出期限']} | 📝 メモ: {row['メモ']} | {status_label}")
+                            
+                            with col_s:
+                                new_status = st.selectbox(
+                                    "ステータス", 
+                                    ["未着手", "進行中", "完了", "提出済"],
+                                    index=["未着手", "進行中", "完了", "提出済"].index(row["ステータス"]),
+                                    key=f"status_{idx}",
+                                    label_visibility="collapsed" 
+                                )
+                                
+                            # 現在のステータスと、選択されたステータスを記憶
+                            update_targets.append({
+                                "row_idx": row.name + 2,
+                                "old_status": row["ステータス"],
+                                "new_status": new_status,
+                                "subject": row['教科']
+                            })
+                            
+                            if row.name != student_tasks.index[-1]:
+                                st.divider()
+                                
+                        # 🌟 フォームの一番下に「一括更新」ボタンを設置
+                        submitted = st.form_submit_button(f"💾 {student} さんの課題を一括更新", use_container_width=True)
                         
-                        col_s, col_b = st.columns([0.7, 0.3])
-                        with col_s:
-                            new_status = st.selectbox(
-                                "ステータス", 
-                                ["未着手", "進行中", "完了", "提出済"],
-                                index=["未着手", "進行中", "完了", "提出済"].index(row["ステータス"]),
-                                key=f"status_{idx}",
-                                label_visibility="collapsed" 
-                            )
-                        with col_b:
-                            if st.button("💾 更新", key=f"btn_{idx}", use_container_width=True):
-                                with st.spinner("反映中..."):
-                                    # 注意: row.name (インデックス) のズレを防ぐため、スプレッドシート上の行番号を使用している前提
-                                    update_success = robust_api_call(update_homework_status, row.name + 2, new_status)
-                                    
-                                    if update_success:
-                                        st.cache_data.clear() 
-                                        time.sleep(1)
-                                        st.success(f"{row['教科']}の状況を更新しました！")
-                                        st.rerun()
-                                    else:
-                                        st.error("通信エラーのため更新に失敗しました。時間をおいて再試行してください。")
-                    
-                    if row.name != student_tasks.index[-1]:
-                        st.divider()
+                        if submitted:
+                            with st.spinner(f"{student} さんのデータを更新中..."):
+                                changed_count = 0
+                                error_count = 0
+                                
+                                for target in update_targets:
+                                    # 🌟 変更があった課題だけを裏側で更新処理する（無駄な通信を削減）
+                                    if target["old_status"] != target["new_status"]:
+                                        success = robust_api_call(update_homework_status, target["row_idx"], target["new_status"])
+                                        if success:
+                                            changed_count += 1
+                                        else:
+                                            error_count += 1
+                                            
+                                if changed_count > 0 and error_count == 0:
+                                    st.cache_data.clear() 
+                                    st.success(f"✅ {changed_count}件のステータスを更新しました！")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                elif changed_count > 0 and error_count > 0:
+                                    st.cache_data.clear()
+                                    st.warning(f"⚠️ {changed_count}件更新しましたが、{error_count}件エラーが発生しました。")
+                                    time.sleep(2)
+                                    st.rerun()
+                                elif error_count > 0:
+                                    st.error("❌ 通信エラーのため更新に失敗しました。時間をおいて再試行してください。")
+                                else:
+                                    st.info("変更されたステータスはありませんでした。")
 
     # ==========================================
     # タブ2：学校 × 学年 での一括登録
@@ -303,34 +335,37 @@ def render_school_homework_page():
                     with st.expander(f"👤 {student} の課題を修正（{len(student_tasks)}件）", expanded=False):
                         for idx, row in student_tasks.iterrows():
                             with st.container(border=True):
-                                c_e1, c_e2, c_e3 = st.columns([2, 3, 2])
-                                edit_subj = c_e1.text_input("教科", value=row.get('教科', ''), key=f"e_subj_{idx}")
-                                edit_task = c_e2.text_input("課題内容", value=row.get('課題内容', ''), key=f"e_task_{idx}")
-                                
-                                try:
-                                    def_date = pd.to_datetime(row.get('提出期限')).date()
-                                except:
-                                    def_date = date.today()
-                                edit_dead = c_e3.date_input("提出期限", value=def_date, key=f"e_dead_{idx}")
-                                
-                                c_e4, c_e5 = st.columns([4, 1])
-                                edit_memo = c_e4.text_input("メモ", value=row.get('メモ', ''), key=f"e_memo_{idx}")
-                                
-                                if c_e5.button("💾 保存", key=f"e_btn_{idx}", use_container_width=True):
-                                    with st.spinner("更新中..."):
-                                        success = robust_api_call(
-                                            update_school_homework_detail,
-                                            row.name + 2, 
-                                            edit_subj, edit_task, edit_dead, edit_memo,
-                                            fallback_value=False
-                                        )
-                                        if success:
-                                            st.success("✅ 更新しました！")
-                                            st.cache_data.clear()
-                                            time.sleep(1)
-                                            st.rerun()
-                                        else:
-                                            st.error("❌ 更新エラー")
+                                with st.form(key=f"edit_form_{idx}", border=False):
+                                    c_e1, c_e2, c_e3 = st.columns([2, 3, 2])
+                                    edit_subj = c_e1.text_input("教科", value=row.get('教科', ''), key=f"e_subj_{idx}")
+                                    edit_task = c_e2.text_input("課題内容", value=row.get('課題内容', ''), key=f"e_task_{idx}")
+                                    
+                                    try:
+                                        def_date = pd.to_datetime(row.get('提出期限')).date()
+                                    except:
+                                        def_date = date.today()
+                                    edit_dead = c_e3.date_input("提出期限", value=def_date, key=f"e_dead_{idx}")
+                                    
+                                    c_e4, c_e5 = st.columns([4, 1])
+                                    edit_memo = c_e4.text_input("メモ", value=row.get('メモ', ''), key=f"e_memo_{idx}")
+                                    
+                                    submitted_edit = c_e5.form_submit_button("💾 保存", use_container_width=True)
+                                    
+                                    if submitted_edit:
+                                        with st.spinner("更新中..."):
+                                            success = robust_api_call(
+                                                update_school_homework_detail,
+                                                row.name + 2, 
+                                                edit_subj, edit_task, edit_dead, edit_memo,
+                                                fallback_value=False
+                                            )
+                                            if success:
+                                                st.success("✅ 更新しました！")
+                                                st.cache_data.clear()
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ 更新エラー")
 
     # ==========================================
     # 🌟 新設タブ5：📜 過去の課題・履歴検索
@@ -356,7 +391,6 @@ def render_school_homework_page():
 
             st.markdown("##### 🔍 過去データの検索条件")
             
-            # 🌟 フォームで囲むことで、ボタンを押すまで再計算が走らないようにする魔法！
             with st.form("search_past_hw_form"):
                 c_s1, c_s2, c_s3 = st.columns(3)
                 search_school = c_s1.selectbox("🏫 学校名", ["すべて"] + sorted([s for s in df_merged['学校名'].unique() if str(s) != 'nan' and str(s).strip() != ""]))
@@ -367,10 +401,8 @@ def render_school_homework_page():
                 search_test = c_s4.selectbox("🔥 テスト種別", ["すべて"] + sorted([t for t in df_merged['テスト種別'].unique() if str(t) != 'nan' and str(t).strip() != ""]))
                 search_subj = c_s5.selectbox("📖 教科", ["すべて"] + sorted([s for s in df_merged['教科'].unique() if str(s) != 'nan' and str(s).strip() != ""]))
 
-                # 🌟 検索ボタン！
                 search_clicked = st.form_submit_button("🔍 この条件で過去の課題を検索する", type="primary", use_container_width=True)
 
-            # 🌟 ボタンが押された時だけ結果を表示する
             if search_clicked:
                 st.divider()
                 
@@ -386,12 +418,10 @@ def render_school_homework_page():
                     if filtered_df.empty:
                         st.info("条件に一致する過去の課題データは見つかりませんでした。")
                     else:
-                        # 全生徒に配られた重複する課題を綺麗に1つにまとめる
                         unique_tasks = filtered_df.drop_duplicates(subset=['教科', '課題内容']).copy()
                         
                         st.success(f"📚 条件に一致する過去の課題が **{len(unique_tasks)}件** 見つかりました！")
 
-                        # 教務アドバイスの自動生成
                         total_tasks = len(unique_tasks)
                         st.markdown("##### 💡 塾長・教室長への教務アドバイス（自動分析）")
                         if total_tasks > 15:
@@ -404,7 +434,6 @@ def render_school_homework_page():
                         st.info(advice)
                         st.write("")
 
-                        # 教科ごとにグループ化して綺麗に表示
                         subjects = unique_tasks['教科'].unique()
                         for subj in subjects:
                             st.markdown(f"#### 📘 【{subj}】の過去課題リスト")
