@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import time
+import datetime # 🌟 日付計算用に追加
 
-# 裏方部隊
-# 🌟 変更: get_all_student_names を get_student_master に変更
 from utils.g_sheets import (
     load_board_message,
     save_board_message,
@@ -12,21 +11,63 @@ from utils.g_sheets import (
     mark_messages_as_read,
     get_student_master,
     load_seating_data,
-    save_seating_data
+    save_seating_data,
+    get_all_logs,      # 🌟 アラートチェック用に追加
+    load_quiz_records  # 🌟 アラートチェック用に追加
 )
 
 from utils.api_guard import robust_api_call
 
-# 🌟 追加: キャッシュして高速化
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+
+# 🌟 アラート判定用にキャッシュ関数を追加
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_get_all_logs():
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_load_quiz_records():
+    return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
+
 
 def render_home_page():
     st.header("📢 ホーム・連絡掲示板")
     
     user_role = st.session_state.get('role', '')
     my_user_id = st.session_state.get('user_id')
+
+    # ==========================================
+    # 🌟【新規追加】管理者専用：URL抜け（小テスト未実施）の自動検知アラート
+    # ==========================================
+    if user_role in ['admin', 'owner', 'head_teacher']:
+        df_logs = cached_get_all_logs()
+        df_quizzes = cached_load_quiz_records()
+        today = datetime.date.today()
+        
+        if not df_logs.empty and "APIエラー発生" not in df_logs.columns:
+            df_logs['日時'] = pd.to_datetime(df_logs['日時'], format='mixed', errors='coerce')
+            today_logs = df_logs[df_logs['日時'].dt.date == today]
+            
+            if not today_logs.empty:
+                name_col = '名前' if '名前' in today_logs.columns else '生徒名'
+                today_students = today_logs[name_col].drop_duplicates().tolist()
+                
+                missing_url_students = []
+                for student in today_students:
+                    has_quiz = False
+                    if not df_quizzes.empty and "APIエラー発生" not in df_quizzes.columns:
+                        df_quizzes['日時'] = pd.to_datetime(df_quizzes['日時'], format='mixed', errors='coerce')
+                        student_quizzes = df_quizzes[(df_quizzes['名前'] == student) & (df_quizzes['日時'].dt.date == today)]
+                        if not student_quizzes.empty:
+                            has_quiz = True
+                            
+                    if not has_quiz:
+                        missing_url_students.append(student)
+                        
+                if missing_url_students:
+                    st.error(f"🚨 **【答案確認URL 未添付アラート】**\n\n本日授業記録がある以下の生徒は、小テスト結果が未登録のためLINE報告書にDriveのURLが添付されていません。画像アップロードと小テスト結果の登録漏れがないか確認してください。\n\n**{', '.join(missing_url_students)}**")
 
     # ==========================================
     # 🌟 個別メッセージエリア
@@ -79,12 +120,10 @@ def render_home_page():
     # ==========================================
     st.subheader("📌 講師向け 連絡事項")
     
-    # 🌟 変更: 戻り値が辞書になるため、fallback_valueも辞書型に変更
     board_data = robust_api_call(load_board_message, fallback_value={"message": "", "updated_at": "---"})
     current_message = board_data.get("message", "本日の連絡事項はありません。")
     updated_at = board_data.get("updated_at", "---")
     
-    # 🌟 追加: メッセージの上に最新の更新日時を小さく表示
     if updated_at and updated_at != "---":
         st.caption(f"🕒 最終更新日時: {updated_at}")
     
@@ -92,7 +131,6 @@ def render_home_page():
     
     if user_role in ['admin', 'owner', 'head_teacher']:
         with st.expander("✏️ 掲示板を編集"):
-            # 💡 valueには辞書から抜いた文字列（current_message）を渡す
             new_msg = st.text_area("内容を入力", value=current_message, height=100)
             if st.button("💾 掲示板を更新"):
                 with st.spinner("更新中..."):
@@ -114,7 +152,6 @@ def render_home_page():
     
     loading_progress = st.progress(0, text="☁️ クラウドからデータを読み込み中...")
     
-    # 🌟 STEP1: 生徒マスターの取得（ID付きリスト作成）
     loading_progress.progress(30, text="📋 生徒名簿を確認中...")
     df_students = cached_get_student_master()
     student_options = []
@@ -122,7 +159,6 @@ def render_home_page():
         student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
     time.sleep(0.2)
     
-    # STEP2: 座席データの取得
     loading_progress.progress(70, text="🪑 今日の座席表を広げています...")
     all_seating_data = robust_api_call(load_seating_data, fallback_value={})
     time.sleep(0.2)
@@ -172,14 +208,12 @@ def render_home_page():
                                     st.write(f"**{booth_name}**")
                                     current_info = slot_data.get(booth_name, {"生徒名": "-- 空席 --", "状態": "出席"})
                                     
-                                    # 🌟 古いデータ（名前のみ）の自己修復ロジック
                                     current_seat = current_info["生徒名"]
                                     if current_seat != "-- 空席 --" and " - " not in current_seat:
                                         matching_opt = next((opt for opt in student_options if opt.endswith(f" - {current_seat}")), None)
                                         if matching_opt:
                                             current_seat = matching_opt
                                     
-                                    # 生徒選択
                                     options = ["-- 空席 --"] + student_options
                                     safe_index = options.index(current_seat) if current_seat in options else 0
                                     
@@ -187,7 +221,6 @@ def render_home_page():
                                                             index=safe_index,
                                                             key=f"sel_{slot_idx}_{idx}")
                                     
-                                    # 状態選択
                                     st_options = ["出席", "遅刻", "欠席連絡あり"]
                                     sel_status = st.radio("状態", st_options, 
                                                           index=st_options.index(current_info["状態"]) if current_info["状態"] in st_options else 0,
@@ -209,7 +242,6 @@ def render_home_page():
                         else:
                             st.error("保存に失敗しました。時間をおいて再試行してください。")
             else:
-                # 閲覧モード
                 if not slot_data:
                     st.info("データがありません。")
                 else:
@@ -226,7 +258,6 @@ def render_home_page():
                                         if info["生徒名"] == "-- 空席 --":
                                             st.caption("-- 空席 --")
                                         else:
-                                            # 🌟 閲覧モード時もID部分を消して名前だけを綺麗に表示する
                                             display_name = info['生徒名'].split(" - ")[1] if " - " in info['生徒名'] else info['生徒名']
                                             color = "#28a745" if info["状態"]=="出席" else "#dc3545"
                                             st.markdown(f"### {display_name}")
