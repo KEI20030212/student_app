@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import re  
-# 🌟 変更: 生徒個別のデータ取得関数を消し、一括取得関数(get_all_logs)のみインポート
-from utils.g_sheets import get_all_logs 
+# 🌟 変更: 小テストデータも一括で読み込むために load_quiz_records を追加
+from utils.g_sheets import get_all_logs, load_quiz_records
 from utils.api_guard import robust_api_call
 
 # --- 🌟 追加機能：「P.14~17」などからページ数を自動計算する関数 ---
@@ -29,26 +29,30 @@ def calculate_page_amount(text):
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
+# 🌟 小テストデータを一括取得するキャッシュ関数を追加
+@st.cache_data(ttl=60)
+def cached_load_quiz_records():
+    return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
+
 def render_analytics_dashboard_page():
     st.header("📊 講師パフォーマンス分析ダッシュボード")
-    st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」を可視化します。")
+    st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」「小テスト実施率」を可視化します。")
 
     # --- 列名の設定 ---
     report_col = 'アドバイス'
     hw_content_col = '次回の宿題ページ数'
     
-    # 🌟 変更: 統合シートの列名「やった宿題P」に合わせる
+    # 統合シートの列名「やった宿題P」に合わせる
     hw_status_col = 'やった宿題P' 
-    # もし統合シート側が「やった宿題」なら以下のように自動で切り替える
-    # hw_status_col = 'やった宿題P' if 'やった宿題P' in df_all.columns else 'やった宿題'
 
     # 月の選択肢準備
     today = pd.Timestamp.now()
     default_months = [(today - pd.DateOffset(months=i)).strftime("%Y年%m月") for i in range(12)]
     
-    # 1. 🌟 変更: データ一括読み込み (たった1回の通信で完了！)
+    # 1. データ一括読み込み (授業記録と小テスト記録)
     with st.spinner('全データを解析中... 先生たちのマネジメント力を集計しています！（超高速🚀）'):
         df_all = cached_get_all_logs()
+        df_quiz = cached_load_quiz_records()
         
     if df_all.empty or "APIエラー発生" in df_all.columns:
         st.info("💡 授業データが登録されていないか、通信エラーで取得できませんでした。")
@@ -63,7 +67,28 @@ def render_analytics_dashboard_page():
 
     df_all['日時'] = pd.to_datetime(df_all['日時'], format='mixed', errors='coerce')
     df_all = df_all.dropna(subset=['日時'])
+    df_all['日付'] = df_all['日時'].dt.date # 🌟 照合用の「日付」列を作成
     df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
+
+    # ==========================================
+    # 🌟 小テスト実施データの照合ロジック
+    # ==========================================
+    if not df_quiz.empty and "APIエラー発生" not in df_quiz.columns:
+        if '名前' in df_quiz.columns:
+            df_quiz = df_quiz.rename(columns={'名前': '生徒名'})
+        
+        df_quiz['日時'] = pd.to_datetime(df_quiz['日時'], format='mixed', errors='coerce')
+        df_quiz['日付'] = df_quiz['日時'].dt.date
+        
+        # 同じ日に同じ生徒が小テストを受けていれば「実施した」とみなす
+        quiz_done = df_quiz[['日付', '生徒名']].drop_duplicates()
+        quiz_done['小テスト実施'] = True
+    else:
+        quiz_done = pd.DataFrame(columns=['日付', '生徒名', '小テスト実施'])
+
+    # 授業記録に「小テスト実施フラグ」を結合
+    df_all = df_all.merge(quiz_done, on=['日付', '生徒名'], how='left')
+    df_all['小テスト実施'] = df_all['小テスト実施'].fillna(False)
 
     # 熱量（文字数）の計算
     if report_col in df_all.columns:
@@ -76,10 +101,7 @@ def render_analytics_dashboard_page():
 
     # 宿題履行率の追跡ロジック
     if '科目' in df_all.columns and '担当講師' in df_all.columns and '生徒名' in df_all.columns:
-        # 時系列順にソート（同じ生徒・科目の連続する授業を特定するため）
         df_all = df_all.sort_values(by=['生徒名', '科目', '日時'])
-        
-        # 今回の行に、「前回の担当講師」と「前回の宿題内容」をスライドさせて持ってくる
         df_all['宿題を出した先生'] = df_all.groupby(['生徒名', '科目'])['担当講師'].shift(1)
         
         if hw_content_col in df_all.columns:
@@ -87,7 +109,6 @@ def render_analytics_dashboard_page():
         else:
             df_all['前回出された宿題内容'] = None
             
-        # 🌟 追加: 「やった宿題P」列が存在しない場合の保険
         if hw_status_col not in df_all.columns and 'やった宿題' in df_all.columns:
             hw_status_col = 'やった宿題'
 
@@ -108,7 +129,8 @@ def render_analytics_dashboard_page():
 
     if selected_teacher == "全員まとめて比較":
         st.subheader(f"🏆 {selected_month} の全体ランキング")
-        c1, c2 = st.columns(2)
+        # 🌟 3列に変更して小テスト実施率を追加
+        c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("**📈 コマ数（授業回数）**")
             koma = df_month['担当講師'].value_counts().reset_index()
@@ -119,17 +141,28 @@ def render_analytics_dashboard_page():
                 st.markdown("**🔥 アドバイスの平均文字数**")
                 avg_chars = df_month.groupby('担当講師')['報告文字数'].mean().reset_index()
                 st.bar_chart(avg_chars.set_index('担当講師'))
+        with c3:
+            st.markdown("**💯 小テスト実施率 (%)**")
+            # 講師ごとにTrueの割合を出すことで実施率を計算
+            quiz_rates = df_month.groupby('担当講師')['小テスト実施'].mean().reset_index()
+            quiz_rates['実施率(%)'] = quiz_rates['小テスト実施'] * 100
+            st.bar_chart(quiz_rates.set_index('担当講師')['実施率(%)'])
+            
     else:
         # 個別分析
         st.subheader(f"👩‍🏫 {selected_teacher} 先生の分析レポート")
         df_t = df_month[df_month['担当講師'] == selected_teacher]
 
-        col_a, col_b = st.columns(2)
+        # 🌟 3列に変更してサマリーにも表示
+        col_a, col_b, col_c = st.columns(3)
         with col_a:
             st.metric("今月の担当コマ数", f"{len(df_t)} コマ")
         with col_b:
             if '報告文字数' in df_t.columns:
                 st.metric("アドバイス平均文字数", f"{int(df_t['報告文字数'].mean())} 文字")
+        with col_c:
+            t_quiz_rate = int(df_t['小テスト実施'].mean() * 100) if len(df_t) > 0 else 0
+            st.metric("小テスト実施率", f"{t_quiz_rate} %")
 
         st.divider()
         
@@ -137,7 +170,6 @@ def render_analytics_dashboard_page():
         st.markdown(f"**📝 宿題量コントロール力（生徒のキャパシティ把握度）**")
         st.caption("※先生が出した宿題の合計ページ数に対して、生徒が実際に解いてきた合計ページ数の割合です。")
         
-        # 該当データだけを抽出
         df_hw_eval = df_month[
             (df_month['宿題を出した先生'] == selected_teacher) & 
             (df_month['前回出された宿題内容'].notna()) & 
@@ -145,7 +177,6 @@ def render_analytics_dashboard_page():
         ].copy()
 
         if not df_hw_eval.empty and hw_status_col in df_hw_eval.columns:
-            # P.14~17 などを実際の「ページ数」に変換！
             df_hw_eval['出したページ数'] = df_hw_eval['前回出された宿題内容'].apply(calculate_page_amount)
             df_hw_eval['解いたページ数'] = df_hw_eval[hw_status_col].apply(calculate_page_amount)
 
@@ -153,20 +184,16 @@ def render_analytics_dashboard_page():
             total_completed = df_hw_eval['解いたページ数'].sum()
 
             if total_assigned > 0:
-                # 割合（パーセンテージ）を計算
                 completion_rate = (total_completed / total_assigned) * 100
                 
-                # 3つの数値を並べて綺麗に表示
                 col1, col2, col3 = st.columns(3)
                 col1.metric("出した宿題の合計", f"{total_assigned} ページ")
                 col2.metric("生徒が解いた合計", f"{total_completed} ページ")
                 col3.metric("達成率 (完了/出した量)", f"{completion_rate:.1f} %")
 
-                # バーで視覚的に表示（最大100%として表示）
                 progress_val = min(completion_rate / 100, 1.0)
                 st.progress(progress_val)
                 
-                # 先生へのフィードバックメッセージ！
                 if completion_rate >= 90:
                     st.success("🌟 素晴らしい！生徒のキャパシティに合った適切な量の宿題が出せています！")
                 elif completion_rate >= 70:
@@ -177,3 +204,27 @@ def render_analytics_dashboard_page():
                 st.info("数値として計算できる宿題データがありません。（例: 「14~17」や「5」などの数字が必要です）")
         else:
             st.info("宿題の達成状況データがまだありません。")
+
+        st.divider()
+
+        # --- 🌟 小テスト実施率 分析 ---
+        st.markdown(f"**💯 小テスト実施率（定着度の計測）**")
+        st.caption("※担当した全授業のうち、小テストを実施してシステムに記録した授業の割合です。")
+        
+        col_q1, col_q2, col_q3 = st.columns(3)
+        total_classes = len(df_t)
+        quiz_done_count = df_t['小テスト実施'].sum()
+        q_rate = (quiz_done_count / total_classes * 100) if total_classes > 0 else 0
+        
+        col_q1.metric("担当コマ数", f"{total_classes} コマ")
+        col_q2.metric("小テスト実施コマ", f"{quiz_done_count} コマ")
+        col_q3.metric("実施率", f"{q_rate:.1f} %")
+        
+        st.progress(min(q_rate / 100, 1.0))
+
+        if q_rate >= 80:
+            st.success("🌟 素晴らしい！授業の定着度を毎回しっかり計測できています！")
+        elif q_rate >= 50:
+            st.info("👍 半数以上の授業でテストを実施できています。")
+        else:
+            st.warning("⚠️ 実施率が低めです。授業の冒頭で小テストを行い、結果を記録するルーティンを徹底しましょう。")

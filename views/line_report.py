@@ -7,14 +7,12 @@ from utils.g_sheets import (
     get_all_logs,
     load_quiz_records, 
     load_school_homework_data,
-    get_sent_list,      # 🌟 追加
-    update_sent_flag    # 🌟 追加
+    get_sent_list,      
+    update_sent_flag    
 )
-# 🌟 追加：URL生成のために裏側のフォルダ取得関数をインポート
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
 
-# 🌟 全データを一括取得するキャッシュ関数群
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
@@ -34,7 +32,6 @@ def render_line_report_page():
     selected_date = st.date_input("📅 授業日を選択", datetime.date.today())
     date_str = selected_date.strftime("%Y/%m/%d")
 
-    # 🌟 送信済みリストを読み込み
     sent_id_list = robust_api_call(get_sent_list, date_str, fallback_value=[])
 
     st.divider()
@@ -49,7 +46,8 @@ def render_line_report_page():
             st.stop()
 
         df_all_logs['日時'] = pd.to_datetime(df_all_logs['日時'], format='mixed', errors='coerce')
-        daily_logs = df_all_logs[df_all_logs['日時'].dt.date == selected_date]
+        target_date = pd.to_datetime(selected_date).date()
+        daily_logs = df_all_logs[df_all_logs['日時'].dt.date == target_date]
 
         if daily_logs.empty:
             st.info(f"📅 {date_str} の授業記録はまだありません。")
@@ -58,10 +56,28 @@ def render_line_report_page():
         id_col = '生徒ID' if '生徒ID' in daily_logs.columns else None
         name_col = '名前' if '名前' in daily_logs.columns else '生徒名'
 
-        # 生徒リストを抽出
         target_students = daily_logs[[id_col, name_col]].drop_duplicates().to_dict('records')
 
-        # 🌟 校舎・種別ごとに振り分け
+        # 🌟【追加機能】管理者専用：URL抜け（小テスト未実施）生徒のピックアップ
+        user_role = st.session_state.get('role', '')
+        if user_role in ['admin', 'owner', 'head_teacher']:
+            missing_url_students = []
+            for s in target_students:
+                s_name = s.get(name_col, "不明")
+                
+                has_quiz = False
+                if not df_all_quizzes.empty and "APIエラー発生" not in df_all_quizzes.columns:
+                    df_all_quizzes['日時'] = pd.to_datetime(df_all_quizzes['日時'], format='mixed', errors='coerce')
+                    student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == s_name) & (df_all_quizzes['日時'].dt.date == target_date)]
+                    if not student_quizzes.empty:
+                        has_quiz = True
+                
+                if not has_quiz:
+                    missing_url_students.append(s_name)
+                    
+            if missing_url_students:
+                st.error(f"🚨 **【管理者アラート】** 以下の生徒は小テスト記録がないため、報告書に「答案確認URL」が表示されていません。\n\n**{', '.join(missing_url_students)}**")
+
         data_buckets = {
             "田端新町校": [],
             "東十条駅前校": [],
@@ -80,13 +96,9 @@ def render_line_report_page():
             else:
                 data_buckets["その他"].append(s)
 
-        # 表示するバケット（校舎）だけを先に抽出する
         display_buckets = {k: v for k, v in data_buckets.items() if len(v) > 0 or k != "その他"}
-
-        # 表示する校舎の分だけタブを作成
         tabs = st.tabs([f"🏫 {k} ({len(v)}名)" for k, v in display_buckets.items()])
 
-        # 抽出したバケットでループを回す
         for t_idx, (bucket_name, students) in enumerate(display_buckets.items()):
             with tabs[t_idx]:
                 if not students:
@@ -97,7 +109,6 @@ def render_line_report_page():
                     student_id = student_info.get(id_col, "未設定")
                     student_name = student_info.get(name_col, "不明")
 
-                    # --- 個別レポート生成ロジック ---
                     student_classes = daily_logs[daily_logs[id_col].astype(str) == str(student_id)]
                     
                     class_sections = []
@@ -117,7 +128,7 @@ def render_line_report_page():
                         if end_page == "nan": end_page = ""
                         
                         if end_page:
-                            progress = "\n　" + end_page.replace("\n", "\n　") if "\n" in end_page else end_page
+                            progress = "\n " + end_page.replace("\n", "\n ") if "\n" in end_page else end_page
                         elif text_name:
                             progress = f"{text_name}"
                         else:
@@ -149,7 +160,6 @@ def render_line_report_page():
                         class_text = f"{prefix}（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                         class_sections.append(class_text)
 
-                        # 各項目の蓄積
                         if advice and advice != "nan":
                             advice_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{advice}")
                         if parent_msg and parent_msg != "nan":
@@ -161,12 +171,11 @@ def render_line_report_page():
                     bring_text = f"🎒 【次回の持ち物】\n" + "\n".join(bring_sections) + "\n\n" if bring_sections else ""
                     hw_text = f"📘 【次回の宿題】\n" + "\n\n".join(hw_sections) + "\n\n" if hw_sections else ""
 
-                    # 小テスト & Drive
                     quiz_text = "小テストは実施していません"
                     drive_url_line = ""
                     if not df_all_quizzes.empty:
                         df_all_quizzes['日時'] = pd.to_datetime(df_all_quizzes['日時'], format='mixed', errors='coerce')
-                        student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == student_name) & (df_all_quizzes['日時'].dt.date == selected_date)]
+                        student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == student_name) & (df_all_quizzes['日時'].dt.date == target_date)]
                         if not student_quizzes.empty:
                             quiz_results = [f"【{row.get('テキスト', '不明')} {row.get('単元', '不明')}】: {row.get('点数', '不明')}点" for _, row in student_quizzes.iterrows()]
                             quiz_text = "\n・".join(quiz_results)
@@ -174,7 +183,6 @@ def render_line_report_page():
                             if folder_id:
                                 drive_url_line = f"📂 【本日の答案確認URL】\nhttps://drive.google.com/drive/folders/{folder_id}\n\n"
 
-                    # 🌟 項目ごと動的に詰める新ロジック
                     if bucket_name == "体験授業":
                         advices_block = f"🗣️ 【本日の輝いていた点】\n" + "\n\n".join(advice_sections) + "\n\n" if advice_sections else ""
                         msgs_block = f"📢 【今後の課題・ご提案】\n" + "\n\n".join(parent_msg_sections) + "\n\n" if parent_msg_sections else ""
@@ -202,14 +210,13 @@ def render_line_report_page():
                             f"💯 【小テスト結果】\n・{quiz_text}\n\n"
                             f"{drive_url_line}"
                             f"{bring_text}"
-                            f"{hw_text}"  # 🌟 ここにも {hw_text} を追加！
+                            f"{hw_text}"  
                             f"{advices_block}"
                             f"{msgs_block}"
                             f"よろしくお願いいたします。\n"
                             f"槌屋"
                         )
 
-                    # 🌟 チェックボックスの状態管理
                     checkbox_key = f"sent_{date_str}_{student_id}"
                     is_already_sent = str(student_id) in sent_id_list
                     
