@@ -1515,6 +1515,46 @@ def update_sent_flag(date_str, student_id, is_sent):
     except:
         return False
 
+def save_parent_reply(date_str, student_id, student_name, teacher_name, reaction_type, reply_text):
+    """保護者からのLINE返信やリアクションをスプレッドシートに記録する"""
+    try:
+        import gspread
+        import datetime
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        
+        # 🌟 列名は全部で7項目（A列〜G列）
+        headers = ["記録日時", "授業日", "生徒ID", "生徒名", "担当講師", "リアクション種別", "返信メモ"]
+        
+        try:
+            ws = sh.worksheet("保護者返信履歴")
+        except gspread.exceptions.WorksheetNotFound:
+            # シートがなければ自動作成 (余裕を持って10列で作成)
+            ws = sh.add_worksheet(title="保護者返信履歴", rows="2000", cols="10")
+            ws.update("A1:G1", [headers]) # 🌟 A1からG1までの7列に修正
+        
+        # 🌟 安全装置：すでにシートが存在していても、1行目が空（列名がない）なら自動作成
+        if not ws.row_values(1):
+            ws.update("A1:G1", [headers])
+            
+        now_str = datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+        ws.append_row([now_str, date_str, str(student_id), student_name, teacher_name, reaction_type, reply_text])
+        return True
+    except:
+        return False
+
+def load_parent_reply_data():
+    """保護者からの返信・リアクション履歴をすべて取得する"""
+    try:
+        import gspread
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("保護者返信履歴")
+        records = ws.get_all_records()
+        return pd.DataFrame(records)
+    except:
+        return pd.DataFrame()
+
 #my_salary.py
 @st.cache_data(ttl=600)
 def load_published_salary():
