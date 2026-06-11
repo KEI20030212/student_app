@@ -2,17 +2,13 @@ import streamlit as st
 import datetime
 import time
 import re
-import os
 import pandas as pd
 
 from utils.g_sheets import (
     get_student_master,
     get_all_teacher_names,
     save_to_spreadsheet, 
-    get_last_page_from_sheet, 
     update_student_homework_rate,
-    get_last_handover,
-    get_last_homework_info,  
     add_new_textbook,        
     get_textbook_master,
     save_quiz_to_dedicated_sheet,
@@ -20,7 +16,8 @@ from utils.g_sheets import (
     get_type_advice_dict,
     save_draft_to_sheet,
     load_draft_from_sheet,
-    delete_draft_from_sheet
+    delete_draft_from_sheet,
+    get_all_logs 
 )
 from utils.calc_logic import (
     calculate_hw_rate, 
@@ -50,7 +47,10 @@ def cached_get_quiz_master():
 def cached_get_type_advice():
     return robust_api_call(get_type_advice_dict, fallback_value={})
 
-# 🌟 一時保存対象のキー (bring を追加)
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_get_all_logs():
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
@@ -60,9 +60,6 @@ DRAFT_PREFIXES = (
     "hw_reason", "hw_fix", "bring"
 )
 
-# ==========================================
-# 🌟 タブ増減のコールバック関数
-# ==========================================
 def add_tab():
     st.session_state['num_blocks'] = st.session_state.get('num_blocks', 1) + 1
 
@@ -171,6 +168,8 @@ def render_multi_input_page():
     if not quiz_names:
         quiz_names = ["設定なし"]
 
+    df_all_logs = cached_get_all_logs()
+
     st.write("### 🗂️ 授業コマの管理")
     num_blocks = st.session_state.get('num_blocks', 1)
 
@@ -254,7 +253,7 @@ def render_multi_input_page():
                                             advices.append(f"・{t_adv}")
                                     
                                     if advices:
-                                        st.info("💡 **指導アドバイス（生徒タイプ別）**\n\n" + "\n".join(advices))
+                                        st.info("💡 **指導アドバイス（生徒タイプ別）**\n" + "\n".join(advices))
 
                                 attendance = st.selectbox("📅 出欠状況", ["出席（通常）", "出席（振替授業を消化）", "欠席（後日振替あり）", "欠席（振替なし）"], key=f"att_{b}_{i}")
                                 late_time = st.number_input("⏰ 遅刻時間 (分)", min_value=0, value=0, step=5, key=f"late_{b}_{i}")
@@ -262,6 +261,7 @@ def render_multi_input_page():
                                 if "欠席" in attendance:
                                     st.warning("欠席のため、進捗・テスト入力はスキップされます。")
                                     input_data_list.append({
+                                        "original_idx": i, 
                                         "student_id" : student_id, "name": name, "subject": "-", "text_name": "-", "advanced_p": "-", 
                                         "quiz_records": [], "w_nums_for_sheet": "", "attendance": attendance,
                                         "late_time": late_time, "concentration": "-", "reaction": "-",
@@ -280,42 +280,56 @@ def render_multi_input_page():
                                         completed_p = 0
                                         last_page_num = 0
                                         
-                                        # ==========================================
-                                        # 📦 アコーディオン1: 前回データの確認と宿題消化
-                                        # ==========================================
                                         with st.expander("🔍 1. 前回データ確認 ＆ 宿題チェック", expanded=not is_trial):
                                             if is_trial:
                                                 st.info("🔰 体験生モード：前回の引き継ぎ・宿題確認はスキップされます。")
                                                 hw_reason_val = ""
                                                 hw_fix_val = ""
                                             else:
-                                                cache_key = f"prev_data_{name}_{subject}"
-                                                if cache_key not in st.session_state:
-                                                    with st.spinner("☁️ 過去のデータを読み込み中..."):
-                                                        st.session_state[cache_key] = {
-                                                            "note": robust_api_call(get_last_handover, name, subject),
-                                                            "hw_info": robust_api_call(get_last_homework_info, name, subject),
-                                                            "page": robust_api_call(get_last_page_from_sheet, name, subject)
-                                                        }
+                                                last_note, last_hw_text, last_hw_pages, last_page = "", "", "", "0"
+                                                last_teacher = "不明"
+                                                last_date_str = "過去データなし"
                                                 
-                                                cached_data = st.session_state[cache_key]
-                                                last_note = cached_data["note"]
-                                                last_hw_text, last_hw_pages = cached_data["hw_info"]
-                                                last_page = cached_data["page"]
+                                                if not df_all_logs.empty and "APIエラー発生" not in df_all_logs.columns:
+                                                    name_col = '生徒名' if '生徒名' in df_all_logs.columns else '名前'
+                                                    df_s = df_all_logs[(df_all_logs[name_col] == name) & (df_all_logs['科目'] == subject)].copy()
+                                                    
+                                                    if not df_s.empty:
+                                                        df_s['日時'] = pd.to_datetime(df_s['日時'], format='mixed', errors='coerce')
+                                                        last_row = df_s.sort_values('日時', ascending=False).iloc[0]
+                                                        
+                                                        last_teacher = str(last_row.get('担当講師', '不明'))
+                                                        last_date_str = last_row['日時'].strftime('%Y/%m/%d') if pd.notna(last_row['日時']) else "不明"
+                                                        
+                                                        # 🌟 空欄やハイフンを「なし」に変換し、文字巨大化バグを防御！
+                                                        last_note = str(last_row.get('次回への引継ぎ事項', ''))
+                                                        if last_note in ["nan", "", "-"]: last_note = "特になし"
+                                                        
+                                                        last_hw_text = str(last_row.get('次回の宿題テキスト', ''))
+                                                        if last_hw_text in ["nan", "", "-"]: last_hw_text = "なし"
+                                                        
+                                                        last_hw_pages = str(last_row.get('次回の宿題ページ数', ''))
+                                                        if last_hw_pages in ["nan", "", "-"]: last_hw_pages = "なし"
+                                                        
+                                                        last_page = str(last_row.get('終了ページ', ''))
+                                                        if last_page in ["nan", "", "-"]: last_page = "なし"
                                                 
                                                 last_page_num = int(last_page) if str(last_page).isdigit() else 0
+                                                
+                                                # 改行コードを半角スペース2つ＋改行に変換して、Markdownの誤作動を完全に阻止
                                                 formatted_last_page = str(last_page).replace('\n', '  \n')
                                                 formatted_last_hw_pages = str(last_hw_pages).replace('\n', '  \n')
 
+                                                st.markdown(f"**📅 前回: {last_date_str} （👨‍🏫 担当: {last_teacher}先生）**")
                                                 st.info(
-                                                    f"📖 **前回の授業進捗:** \n{formatted_last_page}\n\n"
-                                                    f"📚 **宿題テキスト:** {last_hw_text}\n"
-                                                    f"🎯 **宿題の範囲:** \n{formatted_last_hw_pages}\n\n"
-                                                    f"💬 **引継ぎメモ:**\n{last_note}"
+                                                    f"📖 **前回の進捗:** {formatted_last_page}  \n"
+                                                    f"📚 **出した宿題:** {last_hw_text}  \n"
+                                                    f"🎯 **宿題範囲:** {formatted_last_hw_pages}  \n\n"
+                                                    f"💬 **引継ぎメモ:** \n{last_note}"
                                                 )
                                                 
                                                 assigned_hw_list = []
-                                                if str(last_hw_pages).strip() and str(last_hw_pages).strip() != "-":
+                                                if str(last_hw_pages).strip() and str(last_hw_pages).strip() not in ["-", "なし"]:
                                                     for line in str(last_hw_pages).split('\n'):
                                                         match = re.search(r'(?:(.*?)[:：]\s*)?[P\.]*(\d+)\s*[〜~-]\s*(\d+)', line)
                                                         if match:
@@ -327,14 +341,17 @@ def render_multi_input_page():
                                                                 assigned_hw_list.append({"text": t_name.strip(), "start": a_start, "end": a_end, "pages": pages})
 
                                                 st.write("📝 **今回の宿題達成状況**")
-                                                is_continuous = st.checkbox("🔄 追加連続コマ（宿題チェックをスキップし、前回分を引き継ぐ）", key=f"cont_{b}_{i}")
-                                                is_hw_forgotten = st.checkbox("❌ 宿題をやってこなかった", key=f"hw_forgot_{b}_{i}")
+                                                
+                                                c_chk1, c_chk2 = st.columns(2)
+                                                with c_chk1:
+                                                    is_continuous = st.checkbox("🔄 前回を引き継ぐ", key=f"cont_{b}_{i}")
+                                                with c_chk2:
+                                                    is_hw_forgotten = st.checkbox("❌ 忘れた・やってない", key=f"hw_forgot_{b}_{i}")
                                                 
                                                 if is_continuous:
-                                                    st.info("💡 連続コマモード：次回の宿題指示にそのまま引き継ぎます。")
+                                                    st.caption("※次回の宿題指示にそのまま引き継ぎます。")
                                                     assigned_p = 0 
                                                 elif is_hw_forgotten:
-                                                    st.warning("⚠️ 宿題未実施として記録します。")
                                                     completed_p = 0
                                                 else:
                                                     if not assigned_hw_list:
@@ -374,7 +391,7 @@ def render_multi_input_page():
                                                             hw_reason_val = f"その他: {reason_other}" if reason_other else "その他"
                                                         else:
                                                             hw_reason_val = reason_sel
-                                                            
+                                                        
                                                     with r_col2:
                                                         fix_sel = st.selectbox("本日の修正策", ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"], key=f"hw_fix_sel_{b}_{i}")
                                                         if fix_sel == "その他":
@@ -383,9 +400,6 @@ def render_multi_input_page():
                                                         else:
                                                             hw_fix_val = fix_sel
 
-                                        # ==========================================
-                                        # 📦 アコーディオン2: 今回の進捗と小テスト
-                                        # ==========================================
                                         with st.expander("📚 2. 今回の授業進捗 ＆ 💯 小テスト", expanded=True):
                                             st.write("📚 **使用テキストと進捗**")
                                             usage_text_options = ["🆕 新規テキスト入力"] + text_options
@@ -459,9 +473,6 @@ def render_multi_input_page():
                                             today_hw_rate = calculate_hw_rate(assigned_p, completed_p)
                                             motivation_rank = calculate_motivation_rank(today_hw_rate, current_quiz_pts, 0)
 
-                                        # ==========================================
-                                        # 📦 アコーディオン3: 授業の様子・次回の宿題・コメント
-                                        # ==========================================
                                         with st.expander("🧠 3. 授業の様子 ＆ 🚀 次回の宿題・コメント", expanded=True):
                                             st.write("🧠 **授業中の様子・評価**")
                                             col_eval1, col_eval2 = st.columns(2)
@@ -515,7 +526,6 @@ def render_multi_input_page():
                                                     else:
                                                         st.info("👆 テキストを選択するとページ入力欄が表示されます")
 
-                                            # 🌟 持ち物入力欄を追加
                                             st.divider()
                                             st.write("🎒 **次回の持ち物**")
                                             next_bring_val = st.text_input(
@@ -537,6 +547,7 @@ def render_multi_input_page():
                                                 next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{b}_{i}")
 
                                         input_data_list.append({
+                                            "original_idx": i, 
                                             "student_id": student_id, "name": name, "subject": subject, "text_name": text_name_str,
                                             "advanced_p": advanced_p_str, "quiz_records": quiz_records, 
                                             "w_nums_for_sheet": w_nums_for_sheet, "attendance": attendance,
@@ -549,13 +560,14 @@ def render_multi_input_page():
                                             "is_trial": is_trial,
                                             "hw_reason": hw_reason_val,
                                             "hw_fix": hw_fix_val,
-                                            "next_bring": next_bring_val # 🌟 追加
+                                            "next_bring": next_bring_val
                                         })
 
                                         st.write("")
+                                        
                                         if st.button(f"👤 {name} の記録だけを個別に保存", key=f"save_single_{b}_{i}", use_container_width=True):
                                             with st.status(f"{name} のデータを保存中...", expanded=True) as status:
-                                                robust_api_call(
+                                                success = robust_api_call(
                                                     save_to_spreadsheet,
                                                     student_id=student_id, name=name, subject=subject, text_name=text_name_str,
                                                     advanced_p=advanced_p_str, quiz_records=[], date=date, 
@@ -567,46 +579,60 @@ def render_multi_input_page():
                                                     concentration=concentration or "-", reaction=reaction or "-",
                                                     hw_reason=hw_reason_val,
                                                     hw_fix=hw_fix_val,
-                                                    next_bring=next_bring_val # 🌟 追加
+                                                    next_bring=next_bring_val,
+                                                    fallback_value=False 
                                                 )
 
-                                                if quiz_records and len(quiz_records) > 0:
-                                                    for q in quiz_records:
-                                                        robust_api_call(
-                                                            save_quiz_to_dedicated_sheet,
-                                                            date_str=date.strftime("%Y/%m/%d"), student_name=name, text_name=q["quiz_name"],
-                                                            chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
-                                                        )
-                                                
-                                                if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
-                                                    try:
-                                                        robust_api_call(update_student_homework_rate, name, subject, assigned_p, completed_p)
-                                                    except Exception:
-                                                        pass 
+                                                if success: 
+                                                    if quiz_records and len(quiz_records) > 0:
+                                                        for q in quiz_records:
+                                                            robust_api_call(
+                                                                save_quiz_to_dedicated_sheet,
+                                                                date_str=date.strftime("%Y/%m/%d"), student_name=name, text_name=q["quiz_name"],
+                                                                chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
+                                                            )
                                                     
-                                                status.update(label="保存完了！", state="complete", expanded=False)
-                                            st.success(f"✅ {name} の記録を保存しました！")
-                                            
-                                            st.session_state[f"saved_flag_{b}_{i}"] = True
-                                            st.session_state[f"saved_name_{b}_{i}"] = name
-                                            st.session_state['last_saved_time'] = None 
-                                            single_save_triggered = (b, i, name)
+                                                    if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
+                                                        try:
+                                                            robust_api_call(update_student_homework_rate, name, subject, assigned_p, completed_p)
+                                                        except Exception:
+                                                            pass 
+                                                    
+                                                    status.update(label="保存完了！", state="complete", expanded=False)
+                                                    st.success(f"✅ {name} の記録を保存しました！")
+                                                    
+                                                    st.session_state[f"saved_flag_{b}_{i}"] = True
+                                                    st.session_state[f"saved_name_{b}_{i}"] = name
+                                                    single_save_triggered = True
+                                                else:
+                                                    status.update(label="保存失敗", state="error", expanded=True)
+                                                    st.error(f"❌ {name} の保存に失敗しました。通信状況を確認して再度お試しください。データは保持されています。")
 
             st.divider()
-            if len(input_data_list) == num_students:
+            
+            if len(input_data_list) > 0:
                 actual_attendees = sum(1 for data in input_data_list if "欠席" not in data["attendance"])
                 actual_class_type = f"1:{actual_attendees}" if actual_attendees > 0 else class_type
                 
-                if actual_attendees < num_students and actual_attendees > 0:
+                if actual_attendees < len(input_data_list) and actual_attendees > 0:
                     st.info(f"💡 欠席者がいるため、実際の授業形態は「{actual_class_type}」として記録されます。")
 
-                if st.button(f"🚀 コマ {b+1} の全員の記録をまとめて保存する", type="primary", key=f"save_all_{b}", use_container_width=True):
+                btn_label = f"🚀 コマ {b+1} の全員の記録をまとめて保存する" if len(input_data_list) == num_students else f"🚀 コマ {b+1} の【未保存の {len(input_data_list)}名】をまとめて保存する"
+
+                if st.button(btn_label, type="primary", key=f"save_all_{b}", use_container_width=True):
                     with st.status("データを保存中...", expanded=True) as status:
+                        all_success = True
                         for data in input_data_list:
+                            o_idx = data["original_idx"]
+                            
                             if "欠席" in data.get("attendance", ""):
+                                st.session_state[f"saved_flag_{b}_{o_idx}"] = True
                                 continue
 
-                            robust_api_call(
+                            if st.session_state.get(f"saved_flag_{b}_{o_idx}", False):
+                                continue
+
+                            success = robust_api_call(
                                 save_to_spreadsheet,
                                 student_id=data.get("student_id", ""), name=data.get("name", ""), subject=data.get("subject", ""),
                                 text_name=data.get("text_name_str", data.get("text_name", "")), advanced_p=data.get("advanced_p_str", ""),
@@ -619,42 +645,47 @@ def render_multi_input_page():
                                 concentration=data.get("concentration", ""), reaction=data.get("reaction", ""),
                                 hw_reason=data.get("hw_reason", ""),
                                 hw_fix=data.get("hw_fix", ""),
-                                next_bring=data.get("next_bring", "") # 🌟 追加
+                                next_bring=data.get("next_bring", ""),
+                                fallback_value=False
                             )
 
-                            if data.get("quiz_records") and len(data["quiz_records"]) > 0:
-                                for q in data["quiz_records"]:
-                                    robust_api_call(
-                                        save_quiz_to_dedicated_sheet,
-                                        date_str=date.strftime("%Y/%m/%d"), student_name=data["name"], text_name=q["quiz_name"],
-                                        chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
-                                    )
-                            
-                            if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
-                                try:
-                                    robust_api_call(update_student_homework_rate, data["name"], data["subject"], data["assigned_p"], data["completed_p"])
-                                except Exception:
-                                    pass 
-                        
-                        status.update(label="保存完了！", state="complete", expanded=False)
+                            if success:
+                                if data.get("quiz_records") and len(data["quiz_records"]) > 0:
+                                    for q in data["quiz_records"]:
+                                        robust_api_call(
+                                            save_quiz_to_dedicated_sheet,
+                                            date_str=date.strftime("%Y/%m/%d"), student_name=data["name"], text_name=q["quiz_name"],
+                                            chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
+                                        )
+                                
+                                if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
+                                    try:
+                                        robust_api_call(update_student_homework_rate, data["name"], data["subject"], data["assigned_p"], data["completed_p"])
+                                    except Exception:
+                                        pass 
+                                        
+                                st.session_state[f"saved_flag_{b}_{o_idx}"] = True
+                                st.session_state[f"saved_name_{b}_{o_idx}"] = data["name"]
+                            else:
+                                all_success = False
+                                st.error(f"❌ {data['name']} さんの保存に失敗しました。")
 
-                    st.success(f"✅ コマ {b+1}（{actual_attendees}名）の記録を保存しました！")
-                    st.session_state['last_saved_time'] = None 
-                    
-                    all_save_triggered = (b, num_students)
+                        if all_success:
+                            status.update(label="未保存者の保存完了！", state="complete", expanded=False)
+                            st.success(f"✅ コマ {b+1}（{actual_attendees}名）の記録を保存しました！")
+                            st.session_state['last_saved_time'] = None 
+                            all_save_triggered = (b, num_students)
+                        else:
+                            status.update(label="一部の保存に失敗しました", state="error", expanded=True)
+                            st.warning("⚠️ 失敗した生徒のデータは画面に残っています。通信状況を確認し「個別に保存」から再試行してください。")
 
             saved_count = sum(1 for idx in range(num_students) if st.session_state.get(f"saved_flag_{b}_{idx}", False))
             if saved_count == num_students and num_students > 0 and not all_save_triggered:
                 st.success("🎉 このコマの全員の入力が完了しました！画面をリセットします...")
                 all_save_triggered = (b, num_students)
 
-    # ==========================================
-    # 🧹 一番最後での遅延お掃除処理
-    # ==========================================
-    
     if all_save_triggered:
         b_idx, students_count = all_save_triggered
-        
         for k in ["class_date", "sb_teacher", "class_type", "sb_class_slot"]:
             if f"{k}_{b_idx}" in st.session_state:
                 del st.session_state[f"{k}_{b_idx}"]
@@ -665,7 +696,7 @@ def render_multi_input_page():
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
             "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
-            "saved_flag", "saved_name", "hw_reason", "hw_fix", "bring" # 🌟 追加
+            "saved_flag", "saved_name", "hw_reason", "hw_fix", "bring"
         ]
         for i_idx in range(students_count):
             for key in list(st.session_state.keys()):
@@ -679,25 +710,6 @@ def render_multi_input_page():
         st.rerun()
 
     elif single_save_triggered:
-        b_idx, i_idx, saved_name = single_save_triggered
-        target_prefixes = [
-            "sel_student", "new_name", "att", "late", "sub", "cont", "hw_forgot",
-            "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
-            "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
-            "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
-            "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
-            "hw_reason", "hw_fix", "bring" # 🌟 追加
-        ]
-        for key in list(st.session_state.keys()):
-            for p in target_prefixes:
-                if key == f"{p}_{b_idx}_{i_idx}" or key.startswith(f"{p}_{b_idx}_{i_idx}_"):
-                    del st.session_state[key]
-                    break
-        if saved_name:
-            for key in list(st.session_state.keys()):
-                if key.startswith(f"prev_data_{saved_name}_"):
-                    del st.session_state[key]
-                    
         st.cache_data.clear()
         time.sleep(1.5)
         st.rerun()
