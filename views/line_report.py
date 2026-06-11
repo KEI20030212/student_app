@@ -101,14 +101,23 @@ def render_line_report_page():
                 missing_url_students = []
                 for s in target_students:
                     s_name = s.get(name_col, "不明")
+                    s_id = s.get(id_col, "未設定")
+                    
+                    # 🌟 追加：Myeトレ受講生をアラートから外すための事前チェック
+                    student_classes_today = daily_logs[daily_logs[id_col].astype(str) == str(s_id)]
+                    used_myetore = any("Myeトレ" in str(row.get("テキスト", "")) for _, row in student_classes_today.iterrows())
+                    
                     has_quiz = False
                     if not df_all_quizzes.empty and "APIエラー発生" not in df_all_quizzes.columns:
                         df_all_quizzes['日時'] = pd.to_datetime(df_all_quizzes['日時'], format='mixed', errors='coerce')
                         student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == s_name) & (df_all_quizzes['日時'].dt.date == target_date)]
                         if not student_quizzes.empty:
                             has_quiz = True
-                    if not has_quiz:
+                            
+                    # 小テストがなく、かつMyeトレも使っていない生徒のみアラート対象にする
+                    if not has_quiz and not used_myetore:
                         missing_url_students.append(s_name)
+                        
                 if missing_url_students:
                     st.error(f"🚨 **【答案確認URL 未添付アラート】** 以下の生徒は小テスト記録がないため、報告書に「答案確認URL」が表示されていません。\n\n**{', '.join(missing_url_students)}**")
 
@@ -135,6 +144,8 @@ def render_line_report_page():
 
                         student_classes = daily_logs[daily_logs[id_col].astype(str) == str(student_id)]
                         class_sections = []; advice_sections = []; hw_sections = []; parent_msg_sections = []; bring_sections = []
+                        
+                        is_myetore_used = False # 🌟 追加：この生徒がMyeトレを使ったかどうかのフラグ
 
                         for _, row in student_classes.iterrows():
                             teacher = row.get("担当講師", "（未入力）")
@@ -145,6 +156,9 @@ def render_line_report_page():
                             if text_name == "nan": text_name = ""
                             end_page = str(row.get("終了ページ", "")).strip()
                             if end_page == "nan": end_page = ""
+                            
+                            if "Myeトレ" in text_name: # 🌟 追加：Myeトレ使用フラグをON
+                                is_myetore_used = True
                             
                             if end_page:
                                 progress = "\n " + end_page.replace("\n", "\n ") if "\n" in end_page else end_page
@@ -185,17 +199,25 @@ def render_line_report_page():
                         bring_text = f"🎒 【次回の持ち物】\n" + "\n".join(bring_sections) + "\n\n" if bring_sections else ""
                         hw_text = f"📘 【次回の宿題】\n" + "\n\n".join(hw_sections) + "\n\n" if hw_sections else ""
 
+                        # 🌟 改修ポイント：小テスト結果の組み立てロジック
                         quiz_text = "小テストは実施していません"
                         drive_url_line = ""
+                        quiz_results_list = []
+                        
                         if not df_all_quizzes.empty:
                             df_all_quizzes['日時'] = pd.to_datetime(df_all_quizzes['日時'], format='mixed', errors='coerce')
                             student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == student_name) & (df_all_quizzes['日時'].dt.date == target_date)]
                             if not student_quizzes.empty:
-                                quiz_results = [f"【{row.get('テキスト', '不明')} {row.get('単元', '不明')}】: {row.get('点数', '不明')}点" for _, row in student_quizzes.iterrows()]
-                                quiz_text = "\n・".join(quiz_results)
+                                quiz_results_list = [f"【{row.get('テキスト', '不明')} {row.get('単元', '不明')}】: {row.get('点数', '不明')}点" for _, row in student_quizzes.iterrows()]
                                 folder_id = robust_api_call(get_or_create_student_folder, student_id, student_name, fallback_value=None)
                                 if folder_id:
                                     drive_url_line = f"📂 【本日の答案確認URL】\nhttps://drive.google.com/drive/folders/{folder_id}\n\n"
+
+                        if is_myetore_used:
+                            quiz_results_list.append("Myeトレの該当範囲をご確認ください")
+                            
+                        if quiz_results_list:
+                            quiz_text = "\n・".join(quiz_results_list)
 
                         if bucket_name == "体験授業":
                             advices_block = f"🗣️ 【本日の輝いていた点】\n" + "\n\n".join(advice_sections) + "\n\n" if advice_sections else ""
