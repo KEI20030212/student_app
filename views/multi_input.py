@@ -51,10 +51,12 @@ def cached_get_type_advice():
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
+# 🌟 変更: 飛び石進捗用の新しいキー "adv_ranges_num", "adv_s", "adv_e" を追加
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
-    "adv_start", "adv_end", "adv_unit", "num_q", "q_name", "q_chap", "q_score", "w",
+    "adv_start", "adv_end", "adv_unit", "adv_ranges_num", "adv_s", "adv_e",
+    "num_q", "q_name", "q_chap", "q_score", "w",
     "cont", "hw_forgot", "done_start", "done_end", "conc", "reac", "hw_texts", "new_hw_text", 
     "n_start", "n_end", "hw_unit", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num",
     "hw_reason", "hw_fix", "bring"
@@ -426,12 +428,10 @@ def render_multi_input_page():
                                                 for t_idx, text_name in enumerate(selected_texts):
                                                     st.caption(f"📘 {text_name} の進捗")
                                                     
-                                                    # 🌟 【天才機能】辞書（dict）で送られてきた単元名をリストに変換！
                                                     if "Myeトレ" in text_name:
                                                         units_raw = cached_get_textbook_master().get(text_name, {})
                                                         
                                                         if isinstance(units_raw, dict):
-                                                            # 辞書の場合は「値（単元名）」をリストにする。単元名が空なら章番号にする安全設計
                                                             unit_options = [str(v).strip() if str(v).strip() else str(k).strip() for k, v in units_raw.items()]
                                                         elif isinstance(units_raw, str):
                                                             unit_options = [u.strip() for u in units_raw.replace('、', ',').split(',') if u.strip()]
@@ -447,15 +447,22 @@ def render_multi_input_page():
                                                         else:
                                                             advanced_p_list.append(f"{text_name}: -")
                                                     else:
-                                                        col_adv1, col_adv2 = st.columns(2)
-                                                        with col_adv1:
-                                                            adv_start = st.number_input(f"開始P", min_value=0, value=last_page_num, key=f"adv_start_{b}_{i}_{t_idx}")
-                                                        with col_adv2:
-                                                            adv_end = st.number_input(f"終了P", min_value=0, value=last_page_num, key=f"adv_end_{b}_{i}_{t_idx}")
+                                                        # 🌟 変更: 進捗でも飛び石入力ができるように変更
+                                                        num_adv_ranges = st.number_input(f"進捗の範囲の数 (飛び石対応)", min_value=1, max_value=5, value=1, key=f"adv_ranges_num_{b}_{i}_{t_idx}")
                                                         
-                                                        if adv_end >= adv_start and adv_end > 0:
-                                                            advanced_p_list.append(f"{text_name}: P.{adv_start}〜{adv_end}")
-                                                        else:
+                                                        has_valid_range = False
+                                                        for r_idx in range(num_adv_ranges):
+                                                            a_s_col, a_e_col = st.columns(2)
+                                                            default_start = last_page_num if r_idx == 0 else 0
+                                                            
+                                                            adv_start = a_s_col.number_input(f"開始P ({r_idx+1})", min_value=0, value=default_start, key=f"adv_s_{b}_{i}_{t_idx}_{r_idx}")
+                                                            adv_end = a_e_col.number_input(f"終了P ({r_idx+1})", min_value=0, value=default_start, key=f"adv_e_{b}_{i}_{t_idx}_{r_idx}")
+                                                            
+                                                            if adv_end >= adv_start and adv_end > 0:
+                                                                advanced_p_list.append(f"{text_name}: P.{adv_start}〜{adv_end}")
+                                                                has_valid_range = True
+                                                                
+                                                        if not has_valid_range:
                                                             advanced_p_list.append(f"{text_name}: -")
                                                 advanced_p_str = "\n".join(advanced_p_list)
                                             else:
@@ -530,7 +537,6 @@ def render_multi_input_page():
                                                         for t_idx, hw_text in enumerate(selected_hw_texts):
                                                             st.write(f"📘 **{hw_text}** の宿題")
                                                             
-                                                            # 🌟 宿題側も天才機能（辞書→リスト化）を追加！
                                                             if "Myeトレ" in hw_text:
                                                                 units_raw = cached_get_textbook_master().get(hw_text, {})
                                                                 
@@ -726,13 +732,15 @@ def render_multi_input_page():
             if f"{k}_{b_idx}" in st.session_state:
                 del st.session_state[f"{k}_{b_idx}"]
 
+        # 🌟 変更: 新しいキーもここでお掃除するように追加しました
         target_prefixes = [
             "sel_student", "new_name", "att", "late", "sub", "cont", "hw_forgot", 
             "done_start", "done_end", "texts", "new_usage_text", "adv_start", 
             "adv_end", "num_q", "q_name", "q_chap", "q_score", "w", 
             "conc", "reac", "hw_texts", "new_hw_text", "hw_ranges_num", 
             "n_s", "n_e", "advc", "p_msg", "next_h", "d_s", "d_e",
-            "saved_flag", "saved_name", "hw_reason", "hw_fix", "bring", "adv_unit", "hw_unit"
+            "saved_flag", "saved_name", "hw_reason", "hw_fix", "bring", "adv_unit", "hw_unit",
+            "adv_ranges_num", "adv_s", "adv_e"
         ]
         for i_idx in range(students_count):
             for key in list(st.session_state.keys()):
