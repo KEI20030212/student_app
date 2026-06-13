@@ -49,8 +49,8 @@ def render_line_report_page():
     
     user_role = st.session_state.get('role', '')
     
-    can_use_report = user_role in ['admin', 'owner', 'AM', 'head_teacher']
-    can_use_reply = user_role in ['admin', 'owner', 'AM']
+    can_use_report = user_role in ['admin', 'owner', 'am', 'head_teacher']
+    can_use_reply = user_role in ['admin', 'owner', 'am']
 
     if not can_use_report and not can_use_reply:
         st.error("🔒 このページへのアクセス権限がありません。管理者または教室長（社員）のみ利用可能です。")
