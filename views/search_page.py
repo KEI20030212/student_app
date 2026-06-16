@@ -10,8 +10,6 @@ from utils.g_sheets import (
 )
 from utils.api_guard import robust_api_call
 
-# 🌟 全データを一括取得するキャッシュ関数群
-@st.cache_data(ttl=600)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -26,7 +24,8 @@ def render_search_page():
     # ==========================================
     # 🌟 生徒リストの取得（マスターからID付きで）
     # ==========================================
-    df_students = cached_get_student_master()
+    df_students_raw = cached_get_student_master()
+    df_students = df_students_raw.copy()
     student_options = []
     if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:
         student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()

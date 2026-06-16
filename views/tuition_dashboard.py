@@ -20,7 +20,6 @@ from utils.pdf_generator import generate_invoice_pdf
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -36,7 +35,8 @@ def cached_load_monthly_totals():
 def render_tuition_dashboard_page():
     st.header("💴 月謝（請求額）管理ダッシュボード")
 
-    df_students = cached_get_student_master()
+    df_students_raw = cached_get_student_master()
+    df_students = df_students_raw.copy()
     price_master = cached_load_price_master()
     
     if not price_master.empty and '学年' in price_master.columns and 'コマ数' in price_master.columns:

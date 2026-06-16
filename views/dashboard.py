@@ -6,10 +6,8 @@ import time
 import random
 import re
 
-# 🌟 api_guard.py から robust_api_call を呼び出す
 from utils.api_guard import robust_api_call 
 
-# 🌟 変更: 不要な関数を削り、マスター取得関数(get_student_master)と統合ログ(get_all_logs)を追加！
 from utils.g_sheets import (
     get_student_master,
     get_all_logs,

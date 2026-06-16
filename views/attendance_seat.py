@@ -10,8 +10,6 @@ from utils.g_sheets import (
 # 🌟 APIガードをインポート
 from utils.api_guard import robust_api_call
 
-# 🌟 追加: キャッシュして高速化
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -20,7 +18,8 @@ def render_attendance_seat_page():
     st.write("今日の授業の座席割り当てと、生徒の出欠状況を一画面で管理します。")
     
     # 🌟 1. 生徒マスターからID付きのリストを作成する
-    df_students = cached_get_student_master()
+    df_students_raw = cached_get_student_master()
+    df_students = df_students_raw.copy()
     student_options = []
     
     if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:

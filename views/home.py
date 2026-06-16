@@ -18,18 +18,17 @@ from utils.g_sheets import (
 
 from utils.api_guard import robust_api_call
 
-@st.cache_data(ttl=600, show_spinner=False)
-def cached_get_student_master():
-    return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+def safe_get_student_master():
+    df = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+    return df.copy() if not df.empty else df
 
-# 🌟 アラート判定用にキャッシュ関数を追加
-@st.cache_data(ttl=60, show_spinner=False)
-def cached_get_all_logs():
-    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+def safe_get_all_logs():
+    df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+    return df.copy() if not df.empty else df
 
-@st.cache_data(ttl=60, show_spinner=False)
-def cached_load_quiz_records():
-    return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
+def safe_load_quiz_records():
+    df = robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
+    return df.copy() if not df.empty else df
 
 
 def render_home_page():
@@ -42,8 +41,8 @@ def render_home_page():
     # 🌟【新規追加】管理者専用：URL抜け（小テスト未実施）の自動検知アラート
     # ==========================================
     if user_role in ['admin', 'owner', 'head_teacher']:
-        df_logs = cached_get_all_logs()
-        df_quizzes = cached_load_quiz_records()
+        df_logs = safe_get_all_logs()         # 🌟 呼び出し名を変更！
+        df_quizzes = safe_load_quiz_records() # 🌟 呼び出し名を変更！
         today = datetime.date.today()
         
         if not df_logs.empty and "APIエラー発生" not in df_logs.columns:
@@ -153,7 +152,8 @@ def render_home_page():
     loading_progress = st.progress(0, text="☁️ クラウドからデータを読み込み中...")
     
     loading_progress.progress(30, text="📋 生徒名簿を確認中...")
-    df_students = cached_get_student_master()
+    df_students = safe_get_student_master() # 🌟 呼び出し名を変更！
+    
     student_options = []
     if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:
         student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()

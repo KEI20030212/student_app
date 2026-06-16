@@ -49,14 +49,15 @@ def cached_load_quiz_data(student_name):
     from utils.g_sheets import load_quiz_data_from_dedicated_sheet
     return robust_api_call(lambda: load_quiz_data_from_dedicated_sheet(student_name), fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_calculate_attendance_rate(student_id, student_name):
     from utils.g_sheets import get_all_logs
-    df_all_logs = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
-    
-    if df_all_logs.empty or '出欠' not in df_all_logs.columns or "APIエラー発生" in df_all_logs.columns:
+    df_all_logs_raw = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+
+    if df_all_logs_raw.empty or '出欠' not in df_all_logs_raw.columns or "APIエラー発生" in df_all_logs_raw.columns:
         return "データなし"
         
+    df_all_logs = df_all_logs_raw.copy()
+    
     if student_id != "未設定" and '生徒ID' in df_all_logs.columns:
         df_student = df_all_logs[df_all_logs['生徒ID'].astype(str) == str(student_id)]
     else:
@@ -80,7 +81,6 @@ def cached_calculate_attendance_rate(student_id, student_name):
     rate = (attend_count / total_lessons) * 100
     return f"{int(rate)}%"
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master_for_report():
     from utils.g_sheets import get_student_master
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
@@ -106,7 +106,8 @@ def render_conference_report(selected_student_option, info):
         student_id = str(info["生徒ID"]).strip()
 
     if not info:
-        df_students = cached_get_student_master_for_report()
+        df_students_raw = cached_get_student_master_for_report()
+        df_students = df_students_raw.copy()
         if not df_students.empty and '生徒名' in df_students.columns:
             student_row = df_students[df_students['生徒名'] == student_name]
             if not student_row.empty:

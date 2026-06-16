@@ -28,7 +28,6 @@ def cached_load_quiz_records():
 def cached_load_hw_records():
     return robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -250,7 +249,8 @@ def render_line_report_page():
         with reply_container:
             st.write("LINE報告に対する保護者様からのリアクションや返信を記録し、信頼関係の見える化（ファン化分析）に活用します✨")
             
-            df_students = cached_get_student_master()
+            df_students_raw = cached_get_student_master()
+            df_students = df_students_raw.copy()
             teacher_names = cached_get_teacher_names()
             
             if df_students.empty:

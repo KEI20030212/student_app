@@ -9,7 +9,6 @@ from utils.g_sheets import get_student_master
 from utils.g_drive import upload_image_to_drive, list_student_images
 from utils.api_guard import robust_api_call
 
-@st.cache_data(ttl=600)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -46,7 +45,8 @@ def render_quiz_image_manager_page():
     st.header("📸 小テスト・画像管理")
     st.write("生徒の小テストの答案やノートの写真を、Google Driveへ高画質で保存・確認できます✨")
 
-    df_students = cached_get_student_master()
+    df_students_raw = cached_get_student_master()
+    df_students = df_students_raw.copy()
     if df_students.empty:
         st.error("生徒データの取得に失敗しました。時間をおいて再読み込みしてください。")
         st.stop()

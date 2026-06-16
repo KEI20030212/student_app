@@ -13,10 +13,6 @@ from utils.g_sheets import (
 )
 from utils.api_guard import robust_api_call
 
-# ==========================================
-# 🌟 APIエラー対策：キャッシュ機能 + 強化版APIコール
-# ==========================================
-@st.cache_data(ttl=600)  
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -38,7 +34,8 @@ def render_quiz_list_page():
     st.header("📝 小テスト進捗＆習熟度マップ")
     st.write("実施した小テストの結果を入力・確認できるページです🎨")
 
-    df_students = cached_get_student_master()
+    df_students_raw = cached_get_student_master()
+    df_students = df_students_raw.copy()
     
     if df_students.empty:
         st.error("生徒データの取得に失敗しました。時間をおいて再読み込みしてください。")

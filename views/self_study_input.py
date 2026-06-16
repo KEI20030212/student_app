@@ -9,7 +9,6 @@ from utils.g_sheets import (
 )
 from utils.api_guard import robust_api_call
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -17,7 +16,8 @@ def render_self_study_input_page():
     st.header("📝 自習記録の入力")
     
     # マスターデータ取得
-    student_df = cached_get_student_master()
+    student_df_raw = cached_get_student_master()
+    student_df = student_df_raw.copy()
     if not student_df.empty:
         student_options = (student_df['生徒ID'].astype(str) + " - " + student_df['生徒名']).tolist()
     else:

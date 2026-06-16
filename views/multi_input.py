@@ -26,8 +26,6 @@ from utils.calc_logic import (
 )
 from utils.api_guard import robust_api_call
 
-# --- 🚀 データ取得を高速化＆保護するキャッシュ関数 ---
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
@@ -150,7 +148,9 @@ def render_multi_input_page():
     if last_saved_time:
         st.error("⚠️ **前回中断した入力データがクラウドに残っています！** 続きから入力する場合は、左メニューの「📂 復元」を先に押してください。")
 
-    student_df = cached_get_student_master()
+    student_df_raw = cached_get_student_master()
+    student_df = student_df_raw.copy()
+    
     if not student_df.empty:
         student_options = (student_df['生徒ID'].astype(str) + " - " + student_df['生徒名']).tolist()
     else:

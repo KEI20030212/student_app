@@ -17,7 +17,6 @@ def calculate_page_amount(text):
         return int(match_single.group(1))
     return 0
 
-@st.cache_data(ttl=60)
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -31,7 +30,6 @@ def cached_load_parent_reply_data():
     return robust_api_call(load_parent_reply_data, fallback_value=pd.DataFrame())
 
 def render_analytics_dashboard_page():
-    # 🌟 変更ポイント：ヘッダーの横にリロードボタンを配置
     col_h, col_r = st.columns([0.8, 0.2])
     with col_h:
         st.header("📊 講師パフォーマンス分析ダッシュボード")
@@ -50,7 +48,8 @@ def render_analytics_dashboard_page():
     default_months = [(today - pd.DateOffset(months=i)).strftime("%Y年%m月") for i in range(12)]
     
     with st.spinner('全データを解析中... 先生たちのマネジメント力を集計しています！（超高速🚀）'):
-        df_all = cached_get_all_logs()
+        df_all_raw = cached_get_all_logs()
+        df_all = df_all_raw.copy()
         df_quiz = cached_load_quiz_records()
         df_reply = cached_load_parent_reply_data() # 🌟 返信履歴をロード
         

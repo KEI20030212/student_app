@@ -151,7 +151,6 @@ def render_self_study_dashboard():
     today = pd.Timestamp.today()
     month_list = [(today - pd.DateOffset(months=i)).strftime('%Y年%m月') for i in range(12)]
     
-    # 🌟 変更: 学年データを get_student_master から取得！
     df_grades = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
     # 🌟 フォームを追加して、ボタンを押すまで読み込まないようにする
