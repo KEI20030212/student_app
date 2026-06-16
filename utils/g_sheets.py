@@ -32,7 +32,7 @@ def get_gc_client():
 
 #改良版コード
 #汎用
-@st.cache_data(ttl=600) # 10分間キャッシュ
+@st.cache_data(ttl=600, show_spinner=False) # 10分間キャッシュ
 def get_all_logs():
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
@@ -44,7 +44,6 @@ def get_student_logs(student_name):
     df = get_all_logs()
     if df.empty:
         return df
-    # 特定の生徒名でフィルタリング
     student_df = df[df["名前"] == student_name]
     return student_df
 
@@ -68,13 +67,12 @@ def _raw_get_student_master():
     【裏方専用】Googleスプレッドシートから直接データを取得する（生通信）
     ※この関数は外から直接呼ばない
     """
-    import pandas as pd
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("設定_生徒情報")
     return pd.DataFrame(ws.get_all_records(numericise_ignore=["all"]))
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_student_master():
     """
     【全画面からの窓口】
