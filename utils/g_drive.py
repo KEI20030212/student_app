@@ -8,13 +8,14 @@ from googleapiclient.discovery import build
 # 🌟 大元フォルダのID
 MAIN_FOLDER_ID = "1PptAgfwzUT-wR5bPyYHaCO_olsEzi8FS" 
 
-# 🌟 ステップ1でコピーしたGASのウェブアプリURLを貼り付けます！
+# 🌟 GASのウェブアプリURL
 GAS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw5HuhPiaY8TwX190H5ya9uLDOsHqiT706n51vHDjHFCmd_sTQQb0654q2QyBavOTGqyA/exec"
 
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly'] # 読み取り専用権限に変更（安全）
+# 🌟 変更点: 削除機能を追加するため、readonlyを外してフルアクセス権限に変更します
+SCOPES = ['https://www.googleapis.com/auth/drive'] 
 
 def get_drive_service():
-    """Google Drive APIに接続する（読み取り専用）"""
+    """Google Drive APIに接続する"""
     secret_dict = json.loads(st.secrets["gcp_service_account_json"])
     creds = Credentials.from_service_account_info(secret_dict, scopes=SCOPES)
     service = build('drive', 'v3', credentials=creds)
@@ -40,7 +41,6 @@ def get_or_create_student_folder(student_id, student_name):
 def upload_image_to_drive(student_id, student_name, file_name, file_bytes, mime_type):
     """GAS（ウェブアプリ）を経由して画像をアップロードする"""
     try:
-        # 画像を文字列（Base64）に変換して安全に送る
         b64_data = base64.b64encode(file_bytes).decode('utf-8')
         
         payload = {
@@ -51,7 +51,6 @@ def upload_image_to_drive(student_id, student_name, file_name, file_bytes, mime_
             "fileData": b64_data
         }
         
-        # GASへデータを送信！
         response = requests.post(GAS_WEBHOOK_URL, json=payload)
         result = response.json()
         
@@ -69,7 +68,7 @@ def list_student_images(student_id, student_name):
     try:
         student_folder_id = get_student_folder_id(student_id, student_name)
         if not student_folder_id:
-            return [] # フォルダがまだない場合は空リストを返す
+            return []
             
         service = get_drive_service()
         query = f"'{student_folder_id}' in parents and trashed=false"
@@ -84,3 +83,67 @@ def list_student_images(student_id, student_name):
     except Exception as e:
         print(f"画像リスト取得エラー: {e}")
         return []
+
+# ==========================================
+# 🗑️ 【改善版】画像を「gomi」フォルダへ移動する関数群
+# ==========================================
+
+def get_or_create_gomi_folder(service):
+    """大元フォルダの中に「gomi」フォルダがあるか探し、なければ作成してIDを返す"""
+    query = f"'{MAIN_FOLDER_ID}' in parents and name='gomi' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    items = results.get('files', [])
+    
+    if items:
+        return items[0]['id']
+    
+    # 存在しない場合は新規作成
+    folder_metadata = {
+        'name': 'gomi',
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [MAIN_FOLDER_ID]
+    }
+    folder = service.files().create(body=folder_metadata, fields='id').execute()
+    return folder.get('id')
+
+
+def delete_file_from_drive(file_id):
+    """指定されたファイルIDの画像を元の生徒フォルダから除外し、「gomi」フォルダへ移動する"""
+    try:
+        service = get_drive_service()
+        
+        # 1. 「gomi」フォルダのIDを取得（なければ自動作成）
+        gomi_folder_id = get_or_create_gomi_folder(service)
+        
+        # 2. 現在の画像が入っている親フォルダ（生徒フォルダ）のIDを特定する
+        file_info = service.files().get(fileId=file_id, fields='parents').execute()
+        previous_parents = ",".join(file_info.get('parents', []))
+        
+        if previous_parents:
+            # 3. 生徒フォルダから除外（removeParents）し、同時にgomiフォルダへ追加（addParents）
+            service.files().update(
+                fileId=file_id,
+                addParents=gomi_folder_id,
+                removeParents=previous_parents,
+                fields='id, parents'
+            ).execute()
+        else:
+            # 万が一、すでに親フォルダを失っている場合はgomiフォルダに直接紐付ける
+            service.files().update(
+                fileId=file_id,
+                addParents=gomi_folder_id,
+                fields='id, parents'
+            ).execute()
+            
+        return True
+        
+    except Exception as e:
+        print(f"Drive画像移動（gomi）エラー: {e}")
+        
+        # API制限や予期せぬエラー時のセーフティネットとしてゴミ箱移動を試みる
+        try:
+            service.files().update(fileId=file_id, body={'trashed': True}).execute()
+            return True
+        except Exception as e2:
+            print(f"Drive画像ゴミ箱移動エラー: {e2}")
+            return False
