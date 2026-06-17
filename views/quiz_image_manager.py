@@ -6,11 +6,13 @@ import io
 from PIL import Image
 
 from utils.g_sheets import get_student_master
-from utils.g_drive import upload_image_to_drive, list_student_images
+# 🌟 変更点: delete_file_from_drive を新しくインポートに追加！
+from utils.g_drive import upload_image_to_drive, list_student_images, delete_file_from_drive
 from utils.api_guard import robust_api_call
 
 def cached_get_student_master():
-    return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+    df = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
+    return df.copy() if not df.empty else df
 
 def process_image_quality(file_bytes):
     """文字が読める画質をキープしたまま、サイズを適正化して超軽量化する関数"""
@@ -20,8 +22,7 @@ def process_image_quality(file_bytes):
         if img.mode != 'RGB':
             img = img.convert('RGB')
 
-        # 🌟 【新機能】自動リサイズ（長辺を最大1600ピクセルに制限）
-        # A4の文字をくっきり残しつつ、データ量を1/10以下に激減させます
+        # 🌟 自動リサイズ（長辺を最大1600ピクセルに制限）
         max_size = 1600
         width, height = img.size
         if max(width, height) > max_size:
@@ -31,11 +32,9 @@ def process_image_quality(file_bytes):
             else:
                 new_height = max_size
                 new_width = int(width * (max_size / height))
-            # 高品質な補間フィルター（LANCZOS）で文字の潰れを防止
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         out_buf = io.BytesIO()
-        # 🌟 保存時の品質を実用上最強の「90%」に調整（100%に比べてファイルサイズが劇的に軽くなります）
         img.save(out_buf, format="JPEG", quality=90, subsampling=0)
         return out_buf.getvalue(), "image/jpeg"
     except Exception as e:
@@ -96,7 +95,6 @@ def render_quiz_image_manager_page():
                     
                     file_bytes = u_file.getvalue()
                     
-                    # 🌟 読み込み時に自動で適切なサイズにリサイズ・軽量化
                     file_bytes, new_mime = process_image_quality(file_bytes)
                     mime_type = new_mime if new_mime else u_file.type
                     
@@ -163,3 +161,25 @@ def render_quiz_image_manager_page():
                         st.caption("（プレビュー不可）")
                         
                     st.markdown(f"[🔗 原寸大で確認・ダウンロード]({img.get('webViewLink')})")
+                    
+                    # ==========================================
+                    # 🗑️ 【新機能】誤操作防止付き画像削除エリア
+                    # ==========================================
+                    # ポップオーバーを使うことで、誤ってボタンに触れても即削除される事故を防ぎます
+                    with st.popover("🗑️ この画像を削除", use_container_width=True):
+                        st.warning("⚠️ 本当に削除しますか？\nGoogle Driveから完全に消去され、元に戻せなくなります。")
+                        
+                        # 画像ごとの一意のID（img.get('id')）をキーにしてボタンを生成
+                        if st.button("🔴 完全に削除する", key=f"del_{img.get('id')}", use_container_width=True):
+                            with st.spinner("Driveから削除中..."):
+                                success = robust_api_call(
+                                    delete_file_from_drive, 
+                                    file_id=img.get('id'), 
+                                    fallback_value=False
+                                )
+                                if success:
+                                    st.success("削除しました！")
+                                    time.sleep(1)
+                                    st.rerun() # ギャラリーを最新状態にするために再読み込み
+                                else:
+                                    st.error("通信エラーにより削除できませんでした。")
