@@ -31,9 +31,10 @@ def cached_load_hw_records():
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
-def cached_get_teacher_names():
-    return robust_api_call(get_all_teacher_names, fallback_value=[])
+# 🌟 修正箇所：二重キャッシュを撤去し、list()で原本を保護！
+def safe_get_teacher_names():
+    lst = robust_api_call(get_all_teacher_names, fallback_value=[])
+    return list(lst)
 
 
 def render_line_report_page():
@@ -190,9 +191,9 @@ def render_line_report_page():
                             class_text = f"{prefix}（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                             class_sections.append(class_text)
 
-                            if advice and advice != "nan": advice_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{advice}")
-                            if parent_msg and parent_msg != "nan": parent_msg_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{parent_msg}")
-                            if hw_content: hw_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{hw_content}")
+                        if advice and advice != "nan": advice_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{advice}")
+                        if parent_msg and parent_msg != "nan": parent_msg_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{parent_msg}")
+                        if hw_content: hw_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{hw_content}")
 
                         classes_text = "\n\n".join(class_sections)
                         bring_text = f"🎒 【次回の持ち物】\n" + "\n".join(bring_sections) + "\n\n" if bring_sections else ""
@@ -251,7 +252,7 @@ def render_line_report_page():
             
             df_students_raw = cached_get_student_master()
             df_students = df_students_raw.copy()
-            teacher_names = cached_get_teacher_names()
+            teacher_names = safe_get_teacher_names() # 🌟 関数名を変更！
             
             if df_students.empty:
                 st.warning("生徒データが読み込めません。")

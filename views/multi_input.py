@@ -30,8 +30,7 @@ def cached_get_student_master():
     df = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
     return df.copy() if not df.empty else df
 
-@st.cache_data(ttl=600, show_spinner=False)
-def cached_get_teacher_names():
+def safe_get_teacher_names():
     lst = robust_api_call(get_all_teacher_names, fallback_value=[])
     return list(lst)
 
@@ -160,7 +159,7 @@ def render_multi_input_page():
         student_options = []
         st.warning("生徒データが取得できませんでした。")
 
-    teacher_names = cached_get_teacher_names()
+    teacher_names = safe_get_teacher_names()
     text_options = list(cached_get_textbook_master().keys())
     
     quiz_details = cached_get_quiz_master()
