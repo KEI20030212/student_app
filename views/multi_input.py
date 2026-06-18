@@ -727,6 +727,9 @@ def render_multi_input_page():
                                 st.session_state[f"saved_flag_{b}_{o_idx}"] = True
                                 st.session_state[f"saved_name_{b}_{o_idx}"] = data["name"]
                                 st.session_state[f"saved_att_{b}_{o_idx}"] = data.get("attendance", "")
+                                
+                                time.sleep(1)
+                                
                             else:
                                 all_success = False
                                 st.error(f"❌ {data['name']} さんの保存に失敗しました。")
