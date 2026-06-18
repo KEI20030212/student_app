@@ -490,6 +490,7 @@ def load_quiz_data_from_dedicated_sheet(student_name):
         return pd.DataFrame()
 
 #multi_input.pyで使用
+@st.cache_data(ttl=600, show_spinner=False)
 def get_all_teacher_names():
     """講師マスタから講師名のリストを取得して五十音順にする"""
     gc = get_gc_client() # 👈 先生の環境に合わせた接続！
