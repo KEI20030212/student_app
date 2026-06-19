@@ -11,7 +11,7 @@ from utils.g_sheets import (
     update_student_homework_rate,
     add_new_textbook,        
     get_textbook_master,
-    save_quiz_to_dedicated_sheet,
+    save_quizzes_to_dedicated_sheet,
     get_quiz_master_dict,
     get_type_advice_dict,
     save_draft_to_sheet,
@@ -622,6 +622,9 @@ def render_multi_input_page():
 
                                         st.write("")
                                         
+                                        # ==========================================
+                                        # 👤 【個別保存】バルク対応版
+                                        # ==========================================
                                         if st.button(f"👤 {name} の記録だけを個別に保存", key=f"save_single_{b}_{i}", use_container_width=True):
                                             with st.status(f"{name} のデータを保存中...", expanded=True) as status:
                                                 success = robust_api_call(
@@ -629,7 +632,7 @@ def render_multi_input_page():
                                                     student_id=student_id, name=name, subject=subject, text_name=text_name_str,
                                                     advanced_p=advanced_p_str, quiz_records=[], date=date, 
                                                     teacher_name=teacher_name, 
-                                                    class_type=actual_class_type, # 🌟【修正】計算した「本当の授業形態」を使用
+                                                    class_type=actual_class_type,
                                                     attendance=attendance,
                                                     class_slot=class_slot, advice=advice, parent_msg=parent_msg,
                                                     next_handover=next_handover, assigned_p=assigned_p, completed_p=completed_p, 
@@ -643,44 +646,58 @@ def render_multi_input_page():
                                                 )
 
                                                 if success: 
+                                                    # 🌟 小テストデータをまとめて箱（リスト）に詰める
                                                     if quiz_records and len(quiz_records) > 0:
+                                                        single_quiz_rows = []
                                                         for q in quiz_records:
-                                                            robust_api_call(
-                                                                save_quiz_to_dedicated_sheet,
-                                                                date_str=date.strftime("%Y/%m/%d"), student_name=name, text_name=q["quiz_name"],
-                                                                chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
-                                                            )
-                                                            time.sleep(0.5)
+                                                            single_quiz_rows.append([
+                                                                date.strftime("%Y/%m/%d"),
+                                                                name,
+                                                                q["quiz_name"],
+                                                                q["unit"],
+                                                                q["score"],
+                                                                "",  # ミス問題番号（現状空文字）
+                                                                "授業内"
+                                                            ])
+                                                        # 🌟 1回だけ通信してまとめてドン！
+                                                        robust_api_call(save_quizzes_to_dedicated_sheet, single_quiz_rows)
                                                     
                                                     if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
                                                         try:
+                                                            time.sleep(0.5) # 連打防止のお守り
                                                             robust_api_call(update_student_homework_rate, name, subject, assigned_p, completed_p)
                                                         except Exception:
                                                             pass 
-                                                    
+                                                        
                                                     status.update(label="保存完了！", state="complete", expanded=False)
                                                     st.success(f"✅ {name} の記録を保存しました！")
                                                     
                                                     st.session_state[f"saved_flag_{b}_{i}"] = True
                                                     st.session_state[f"saved_name_{b}_{i}"] = name
-                                                    st.session_state[f"saved_att_{b}_{i}"] = attendance # 🌟 出欠状態も確実に記録
+                                                    st.session_state[f"saved_att_{b}_{i}"] = attendance 
                                                     single_save_triggered = True
                                                 else:
                                                     status.update(label="保存失敗", state="error", expanded=True)
-                                                    st.error(f"❌ {name} の保存に失敗しました。通信状況を確認して再度お試しください。データは保持されています。")
+                                                    st.error(f"❌ {name} の保存に失敗しました。通信状況を確認して再度お試しください。")
 
             st.divider()
             
             if len(input_data_list) > 0:
-                # 🌟 タブ全体で欠席者がいるかどうかの案内表示
                 if actual_attendees < num_students and actual_attendees > 0:
                     st.info(f"💡 タブ内に欠席者がいるため、実際の授業形態は「{actual_class_type}」として記録されます。")
 
                 btn_label = f"🚀 コマ {b+1} の全員の記録をまとめて保存する" if len(input_data_list) == num_students else f"🚀 コマ {b+1} の【未保存の {len(input_data_list)}名】をまとめて保存する"
 
+                # ==========================================
+                # 🚀 【全員まとめて保存】バルク対応版
+                # ==========================================
                 if st.button(btn_label, type="primary", key=f"save_all_{b}", use_container_width=True):
                     with st.status("データを保存中...", expanded=True) as status:
                         all_success = True
+                        
+                        # 🌟 このコマの全員の全小テストデータを一時的に溜めるための「超巨大な箱」を用意
+                        all_class_quiz_rows = []
+                        
                         for data in input_data_list:
                             o_idx = data["original_idx"]
                             
@@ -697,7 +714,7 @@ def render_multi_input_page():
                                 student_id=data.get("student_id", ""), name=data.get("name", ""), subject=data.get("subject", ""),
                                 text_name=data.get("text_name_str", data.get("text_name", "")), advanced_p=data.get("advanced_p_str", ""),
                                 quiz_records=[], date=date, teacher_name=teacher_name, 
-                                class_type=actual_class_type, # 🌟【修正】全体計算済みの本当の授業形態
+                                class_type=actual_class_type,
                                 attendance=data.get("attendance", ""), class_slot=class_slot, advice=data.get("advice", ""),
                                 parent_msg=data.get("parent_msg", ""), next_handover=data.get("next_handover", ""),
                                 assigned_p=data.get("assigned_p", 0), completed_p=data.get("completed_p", 0), 
@@ -711,17 +728,22 @@ def render_multi_input_page():
                             )
 
                             if success:
+                                # 🌟 ここではGoogleに送信せず、巨大な箱にデータをひたすら追加していく
                                 if data.get("quiz_records") and len(data["quiz_records"]) > 0:
                                     for q in data["quiz_records"]:
-                                        robust_api_call(
-                                            save_quiz_to_dedicated_sheet,
-                                            date_str=date.strftime("%Y/%m/%d"), student_name=data["name"], text_name=q["quiz_name"],
-                                            chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
-                                        )
-                                        time.sleep(0.25)
+                                        all_class_quiz_rows.append([
+                                            date.strftime("%Y/%m/%d"),
+                                            data["name"],
+                                            q["quiz_name"],
+                                            q["unit"],
+                                            q["score"],
+                                            "",
+                                            "授業内"
+                                        ])
                                 
                                 if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
                                     try:
+                                        time.sleep(0.25) # ここは0.25秒でも、次の処理まで間隔が空くので安全です
                                         robust_api_call(update_student_homework_rate, data["name"], data["subject"], data["assigned_p"], data["completed_p"])
                                     except Exception:
                                         pass 
@@ -730,11 +752,17 @@ def render_multi_input_page():
                                 st.session_state[f"saved_name_{b}_{o_idx}"] = data["name"]
                                 st.session_state[f"saved_att_{b}_{o_idx}"] = data.get("attendance", "")
                                 
-                                time.sleep(1)
+                                # 生徒間の切り替え待機
+                                time.sleep(0.25)
                                 
                             else:
                                 all_success = False
                                 st.error(f"❌ {data['name']} さんの保存に失敗しました。")
+
+                        # 🌟【ココが真骨頂！】全員の本番シート保存が終わったあと、最後に小テストデータを1発で送信！
+                        if all_success and all_class_quiz_rows:
+                            status.write("💯 全員の小テスト記録を一括同期中...")
+                            robust_api_call(save_quizzes_to_dedicated_sheet, all_class_quiz_rows)
 
                         if all_success:
                             status.update(label="未保存者の保存完了！", state="complete", expanded=False)
