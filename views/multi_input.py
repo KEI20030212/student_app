@@ -650,6 +650,7 @@ def render_multi_input_page():
                                                                 date_str=date.strftime("%Y/%m/%d"), student_name=name, text_name=q["quiz_name"],
                                                                 chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                                             )
+                                                            time.sleep(0.5)
                                                     
                                                     if attendance != "欠席（振替なし）" and "欠席" not in attendance and not is_trial:
                                                         try:
@@ -717,6 +718,7 @@ def render_multi_input_page():
                                             date_str=date.strftime("%Y/%m/%d"), student_name=data["name"], text_name=q["quiz_name"],
                                             chapter=q["unit"], score=q["score"], w_nums="", mode="授業内"
                                         )
+                                        time.sleep(0.25)
                                 
                                 if data["attendance"] != "欠席（振替なし）" and "欠席" not in data["attendance"] and not data.get("is_trial"):
                                     try:
