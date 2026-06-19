@@ -490,23 +490,33 @@ def load_quiz_data_from_dedicated_sheet(student_name):
         return pd.DataFrame()
 
 #multi_input.pyで使用
-@st.cache_data(ttl=600, show_spinner=False)
-def get_all_teacher_names():
-    """講師マスタから講師名のリストを取得して五十音順にする"""
-    gc = get_gc_client() # 👈 先生の環境に合わせた接続！
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
+def _raw_get_all_teacher_names():
+    """
+    【裏方専用】Googleスプレッドシートから直接講師リストを取得する（生通信）
+    ※この関数は外から直接呼ばない
+    """
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    sheet = sh.worksheet("講師マスタ")
+    
+    names = sheet.col_values(1)[1:] # 1行目の見出しを飛ばしてA列を取得
+    names = sorted([name.strip() for name in names if name.strip()])
+    
+    return names
 
-        sheet = sh.worksheet("講師マスタ")
-        
-        names = sheet.col_values(1)[1:] # 1行目の見出しを飛ばしてA列を取得
-        names = sorted([name.strip() for name in names if name.strip()])
-        return names
-        
-    except Exception as e:
-        import streamlit as st
-        st.error(f"🚨 講師マスタの取得に失敗しました！原因: {e}")
-        return []
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_all_teacher_names():
+    """
+    【全画面からの窓口】
+    robust_api_call を使って安全に通信し、成功した結果だけをキャッシュする最強の盾！
+    """
+    from utils.api_guard import robust_api_call
+    
+    # 🌟 生通信関数を robust_api_call で守りながら実行（失敗した時の安全ネットは空のリスト []）
+    lst = robust_api_call(_raw_get_all_teacher_names, fallback_value=[])
+    
+    # 🌟 リストの原本を保護するため、list() でコピーして返す（Mutation Error対策）
+    return list(lst)
 
 def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, hw_reason="", hw_fix="", next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-", next_bring=""):
     print(f"🌟🌟🌟 保存処理スタート！ ID:{student_id} 生徒名:{name} 🌟🌟🌟") 
@@ -606,7 +616,7 @@ def get_last_homework_info(name, subject):
     except Exception as e:
         return "なし", "-"
 
-def get_last_page_from_sheet(name, subject): # 🌟 引数に subject を追加！
+def get_last_page_from_sheet(name, subject):
     """
     「授業ログ統合」シートから、特定の科目の前回の終了ページ（進捗）を探し出す関数
     """
@@ -695,7 +705,6 @@ def add_new_textbook(new_name):
 
 def get_textbook_master():
     """テキストと章、および単元名を取得する"""
-    import streamlit as st
     try:
         gc = get_gc_client()
         sh = gc.open_by_key(SPREADSHEET_ID)
