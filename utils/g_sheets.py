@@ -1214,31 +1214,22 @@ def get_quiz_master_dict():
         print(f"小テスト設定の読み込みエラー: {e}")
         return {}
 
-def save_quiz_to_dedicated_sheet(date_str, student_name, text_name, chapter, score, w_nums, mode):
+def save_quizzes_to_dedicated_sheet(rows):
     """
-    小テスト専用シートに記録を保存する
-    mode: "授業内" または "自習"
+    【バルク対応】小テスト専用シートに複数の記録をまとめて一括保存する関数
+    rows: [ [日時, 名前, テキスト, 単元, 点数, ミス番号, 実施形態], [...] ] の二次元リスト
     """
-    try:
-        gc = get_gc_client()
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        ws = sh.worksheet("小テスト記録")
-        
-        row_data = [
-            date_str,      # 日時
-            student_name,  # 名前
-            text_name,     # テキスト
-            chapter,       # 単元
-            score,         # 点数
-            w_nums,        # ミス問題番号
-            mode           # 実施形態（授業内/自習）
-        ]
-        
-        ws.append_row(row_data)
+    if not rows:
         return True
-    except Exception as e:
-        st.error(f"小テスト保存エラー: {e}")
-        return False
+        
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("小テスト記録")
+    
+    # 🌟 gspreadの append_rows を使うことで、二次元配列を一撃で追加！通信は1回のみ！
+    # value_input_option="RAW" を添えて、Googleの勝手な型変換によるバグを防御します
+    ws.append_rows(rows, value_input_option="RAW")
+    return True
 
 #quiz_maker.py
 def add_quiz_maker_sheet(test_name, sheet_id, full_marks, paper_size="A4"): # 🌟 ここに full_marks を追加！
