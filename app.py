@@ -3,7 +3,7 @@ from PIL import Image
 # ==========================================
 # 📦 1. 画面部隊（views）のインポート
 # ==========================================
-from views.home import render_home_page
+from views.home import render_combined_home_page
 from views.attendance_seat import render_attendance_seat_page#改良済
 from views.multi_input import render_multi_input_page#改良済
 from views.input_combined import render_combined_input_page
@@ -91,7 +91,7 @@ def main():
     st.sidebar.title(f"👤 {st.session_state['username']} メニュー")
     
     menu_options = [
-        "📢 ホーム・連絡・出席掲示板",
+        "📢 ホーム・連絡",
         "📝 授業・自習記録の入力 (出欠対応)",
         "🏫 教室・学習状況ダッシュボード",
         "👤 生徒個別ポータル",
@@ -129,7 +129,7 @@ def main():
     # ==========================================
     # 🎯 選ばれたメニューに応じて、該当する画面関数を呼び出すだけ！
     # ==========================================
-    if page == "📢 ホーム・連絡・出席掲示板": render_home_page()
+    if page == "📢 ホーム・連絡": render_combined_home_page()
     elif page == "📝 授業・自習記録の入力 (出欠対応)": render_combined_input_page()
     elif page == "👤 生徒個別ポータル": render_student_portal_page()
     elif page == "💯 小テスト管理センター": render_quiz_management_page()
