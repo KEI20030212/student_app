@@ -518,42 +518,59 @@ def get_all_teacher_names():
     # 🌟 リストの原本を保護するため、list() でコピーして返す（Mutation Error対策）
     return list(lst)
 
+def save_logs_to_spreadsheet(rows):
+    """
+    【バルク対応】授業ログ統合シートに複数行の記録をまとめて一括保存する関数
+    rows: [ [日時, 生徒ID, 名前, ...], [...], ... ] の二次元リスト（27列構成）
+    """
+    if not rows:
+        return True
+        
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    worksheet = sh.worksheet("授業ログ統合")
+    
+    worksheet.append_rows(rows, value_input_option="RAW")
+    return True
+
 def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, hw_reason="", hw_fix="", next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-", next_bring=""):
     print(f"🌟🌟🌟 保存処理スタート！ ID:{student_id} 生徒名:{name} 🌟🌟🌟") 
     
     gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        worksheet = sh.worksheet("授業ログ統合")
-        
-        date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
-        
-        # 🌟 safe_class_type やシングルクォーテーションなどの小細工はすべて削除！
-        
-        if not quiz_records:
-            worksheet.append_row([
-                date_str, student_id, name, subject, text_name, advanced_p, 
-                "-", "-", "-", teacher_name, 
-                class_type, # 🌟 そのまま渡す！
-                attendance, class_slot, advice, parent_msg, next_handover, 
-                assigned_p, completed_p, motivation_rank, hw_reason, hw_fix, 
-                next_hw_text, next_hw_pages, late_time, concentration, reaction, next_bring
-            ], value_input_option="RAW") # 🌟 【最強の解決策】RAW指定でGoogleの自動変換を完全ブロック！
-        else:
-            for q in quiz_records:
-                worksheet.append_row([
-                    date_str, student_id, name, subject, text_name, advanced_p, 
-                    f"第{q['unit']}章", q['score'], "-", teacher_name, 
-                    class_type, # 🌟 そのまま渡す！
-                    attendance, class_slot, advice, parent_msg, next_handover, 
-                    assigned_p, completed_p, motivation_rank, next_hw_text, 
-                    next_hw_pages, late_time, concentration, reaction
-                ], value_input_option="RAW") # 🌟 【最強の解決策】RAW指定でGoogleの自動変換を完全ブロック！
-        return True
-    except Exception as e:
-        import streamlit as st
-        st.error(f"🚨 スプレッドシートの書き込みでエラーが発生しました: {e}")
-        return False
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    worksheet = sh.worksheet("授業ログ統合")
+    
+    date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
+
+    row_data = [
+        date_str,          # 0: 日時
+        student_id,        # 1: 生徒ID
+        name,              # 2: 名前
+        subject,           # 3: 科目
+        text_name,         # 4: テキスト
+        advanced_p,        # 5: 終了ページ
+        teacher_name,      # 6: 担当講師 (ここから左に3列詰めました)
+        class_type,        # 7: 授業形態
+        attendance,        # 8: 出欠
+        class_slot,        # 9: 授業コマ
+        advice,            # 10: アドバイス
+        parent_msg,        # 11: 保護者への連絡
+        next_handover,     # 12: 次回への引継ぎ
+        assigned_p,        # 13: 出した宿題P
+        completed_p,       # 14: やった宿題P
+        motivation_rank,   # 15: やる気ランク
+        hw_reason,         # 16: 未達成の理由
+        hw_fix,            # 17: 本日の修正策
+        next_hw_text,      # 18: 次回の宿題テキスト
+        next_hw_pages,     # 19: 次回の宿題ページ数
+        late_time,         # 20: 遅刻時間
+        concentration,     # 21: 集中力
+        reaction,          # 22: ミスへの反応
+        next_bring         # 23: 次回の持ち物
+    ]
+    
+    worksheet.append_row(row_data, value_input_option="RAW")
+    return True
 
 def get_last_handover(name, subject):
     """
