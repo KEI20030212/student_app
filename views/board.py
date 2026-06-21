@@ -20,7 +20,7 @@ def safe_load_quiz_records():
     return df.copy() if not df.empty else df
 
 def render_home_page():
-    st.header("📢 ホーム・連絡掲示板")
+    st.header("📢 連絡掲示板")
     
     user_role = st.session_state.get('role', '')
 
