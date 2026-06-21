@@ -91,7 +91,7 @@ def main():
     st.sidebar.title(f"👤 {st.session_state['username']} メニュー")
     
     menu_options = [
-        "📢 ホーム・連絡",
+        "📢 ホーム",
         "📝 授業・自習記録の入力 (出欠対応)",
         "🏫 教室・学習状況ダッシュボード",
         "👤 生徒個別ポータル",
@@ -129,7 +129,7 @@ def main():
     # ==========================================
     # 🎯 選ばれたメニューに応じて、該当する画面関数を呼び出すだけ！
     # ==========================================
-    if page == "📢 ホーム・連絡": render_combined_home_page()
+    if page == "📢 ホーム": render_combined_home_page()
     elif page == "📝 授業・自習記録の入力 (出欠対応)": render_combined_input_page()
     elif page == "👤 生徒個別ポータル": render_student_portal_page()
     elif page == "💯 小テスト管理センター": render_quiz_management_page()
