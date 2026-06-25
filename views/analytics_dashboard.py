@@ -154,17 +154,20 @@ def render_analytics_dashboard_page():
         st.markdown("### 💬 講師別：保護者のリアクション比率（ファン化度グラフ）")
         st.caption("※「既読スルー（自動カウント）」は除外し、実際にアクションがあったものだけを表示しています。")
         
-        # 🌟 修正：グラフ描画用データから「既読スルー」を除外
         df_react_only = df_month[df_month['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
-        df_pivot = pd.crosstab(df_react_only['担当講師'], df_react_only['保護者リアクション'])
         
-        # グラフから講師が消えないように、リアクション0の講師も0で補完
-        for t in teachers:
-            if t not in df_pivot.index:
-                df_pivot.loc[t] = 0
-                
-        df_pivot = df_pivot.loc[[t for t in df_pivot.index if t in teachers]]
-        st.bar_chart(df_pivot, stack=True)
+        # 🌟 修正：リアクションが1件でも存在する場合のみピボット集計を実行（ValueError防止ガード）
+        if not df_react_only.empty:
+            df_pivot = pd.crosstab(df_react_only['担当講師'], df_react_only['保護者リアクション'])
+            
+            for t in teachers:
+                if t not in df_pivot.index:
+                    df_pivot.loc[t] = 0
+                    
+            df_pivot = df_pivot.loc[[t for t in df_pivot.index if t in teachers]]
+            st.bar_chart(df_pivot, stack=True)
+        else:
+            st.info("💡 選択された月には、「既読スルー」以外の保護者リアクションがまだ記録されていません。")
             
     else:
         # 個別分析
@@ -246,13 +249,13 @@ def render_analytics_dashboard_page():
             for k, v in reply_counts.items():
                 st.write(f"- {k}: **{v}** 件")
         with col_r2:
-            # 🌟 修正：既読スルーを除外し、リアクションがある場合のみグラフを描画
+            # 🌟 修正：ここも既読スルーを除外したデータが空でない場合のみグラフを描画
             df_t_react_only = df_t[df_t['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
             if not df_t_react_only.empty:
                 df_t_pivot = pd.crosstab(df_t_react_only['担当講師'], df_t_react_only['保護者リアクション'])
                 st.bar_chart(df_t_pivot, stack=True)
             else:
-                st.info("今月はまだ保護者からのリアクションはありません。")
+                st.info("今月はまだ保護者からのポジティブリアクションはありません。")
             
         if star_rate >= 30:
             st.success(f"🔥 **超優秀ファンタジスタ講師！** 報告書の3割以上で保護者から大絶賛（神対応）を貰っています。保護者からの信頼が極めて厚いため、今後の提案業務などの中心人物として活躍が期待できます。")
