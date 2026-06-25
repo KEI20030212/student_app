@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re  
-from utils.g_sheets import get_all_logs, load_quiz_records, load_parent_reply_data # 🌟 返信データ取得関数を追加
+from utils.g_sheets import get_all_logs, load_quiz_records, load_parent_reply_data
 from utils.api_guard import robust_api_call
 
 def calculate_page_amount(text):
@@ -24,7 +24,6 @@ def cached_get_all_logs():
 def cached_load_quiz_records():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
-# 🌟 追加：保護者返信の一括取得キャッシュ
 @st.cache_data(ttl=60)
 def cached_load_parent_reply_data():
     return robust_api_call(load_parent_reply_data, fallback_value=pd.DataFrame())
@@ -35,8 +34,8 @@ def render_analytics_dashboard_page():
         st.header("📊 講師パフォーマンス分析ダッシュボード")
     with col_r:
         if st.button("🔄 データを更新", use_container_width=True):
-            st.cache_data.clear() # キャッシュを強制クリア
-            st.rerun()            # 画面を再読み込み
+            st.cache_data.clear() 
+            st.rerun()            
 
     st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」「小テスト実施率」「保護者ファン化度」を可視化します。")
 
@@ -51,7 +50,7 @@ def render_analytics_dashboard_page():
         df_all_raw = cached_get_all_logs()
         df_all = df_all_raw.copy()
         df_quiz = cached_load_quiz_records()
-        df_reply = cached_load_parent_reply_data() # 🌟 返信履歴をロード
+        df_reply = cached_load_parent_reply_data() 
         
     if df_all.empty or "APIエラー発生" in df_all.columns:
         st.info("💡 授業データが登録されていないか、通信エラーで取得できませんでした。")
@@ -81,15 +80,11 @@ def render_analytics_dashboard_page():
     df_all = df_all.merge(quiz_done, on=['日付', '生徒名'], how='left')
     df_all['小テスト実施'] = df_all['小テスト実施'].fillna(False)
 
-    # ==========================================
-    # 🌟 【新機能】保護者リアクション（自動既読スルー補完）の結合ロジック
-    # ==========================================
+    # --- 保護者リアクションの結合 ---
     if not df_reply.empty and "APIエラー発生" not in df_reply.columns:
-        # 🌟 必要な列がすべて揃っているかチェック（KeyError防止）
         required_cols = ['授業日', '生徒名', '担当講師', 'リアクション種別']
         if all(col in df_reply.columns for col in required_cols):
             df_reply['授業日'] = pd.to_datetime(df_reply['授業日'], format='mixed', errors='coerce').dt.date
-            # 必要な列だけを抽出してリネーム
             reply_clean = df_reply[['授業日', '生徒名', '担当講師', 'リアクション種別']].copy()
             reply_clean.columns = ['日付', '生徒名', '担当講師', '保護者リアクション']
             reply_clean = reply_clean.drop_duplicates(subset=['日付', '生徒名', '担当講師'])
@@ -98,7 +93,6 @@ def render_analytics_dashboard_page():
     else:
         reply_clean = pd.DataFrame(columns=['日付', '生徒名', '担当講師', '保護者リアクション'])
 
-    # 授業データに結合（入力がない授業は自動的に「既読スルー」にする！）
     df_all = df_all.merge(reply_clean, on=['日付', '生徒名', '担当講師'], how='left')
     df_all['保護者リアクション'] = df_all['保護者リアクション'].fillna("🔵 既読スルー（自動カウント）")
 
@@ -156,14 +150,19 @@ def render_analytics_dashboard_page():
             quiz_rates['実施率(%)'] = quiz_rates['小テスト実施'] * 100
             st.bar_chart(quiz_rates.set_index('担当講師')['実施率(%)'])
             
-        # 🌟 【新設】② 保護者リアクションの割合（一括積み上げ棒グラフ）
         st.write("")
         st.markdown("### 💬 講師別：保護者のリアクション比率（ファン化度グラフ）")
-        st.caption("※未入力の授業報告は自動的に「既読スルー」として集計に含まれます。")
+        st.caption("※「既読スルー（自動カウント）」は除外し、実際にアクションがあったものだけを表示しています。")
         
-        # 講師×リアクションのクロス集計テーブルを作成してbar_chartに丸投げ
-        df_pivot = pd.crosstab(df_month['担当講師'], df_month['保護者リアクション'])
-        # 講師以外のノイズ（空欄など）があれば排除
+        # 🌟 修正：グラフ描画用データから「既読スルー」を除外
+        df_react_only = df_month[df_month['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
+        df_pivot = pd.crosstab(df_react_only['担当講師'], df_react_only['保護者リアクション'])
+        
+        # グラフから講師が消えないように、リアクション0の講師も0で補完
+        for t in teachers:
+            if t not in df_pivot.index:
+                df_pivot.loc[t] = 0
+                
         df_pivot = df_pivot.loc[[t for t in df_pivot.index if t in teachers]]
         st.bar_chart(df_pivot, stack=True)
             
@@ -172,7 +171,6 @@ def render_analytics_dashboard_page():
         st.subheader(f"👩‍🏫 {selected_teacher} 先生の分析レポート")
         df_t = df_month[df_month['担当講師'] == selected_teacher]
 
-        # 🌟 サマリーの列を4列に拡張して「③神対応率」を表示
         col_a, col_b, col_c, col_d = st.columns(4)
         with col_a:
             st.metric("今月の担当コマ数", f"{len(df_t)} コマ")
@@ -183,7 +181,6 @@ def render_analytics_dashboard_page():
             t_quiz_rate = int(df_t['小テスト実施'].mean() * 100) if len(df_t) > 0 else 0
             st.metric("小テスト実施率", f"{t_quiz_rate} %")
         with col_d:
-            # 🌟 【新設】③神対応（大絶賛）獲得率の算出
             star_count = df_t['保護者リアクション'].str.contains("大絶賛").sum()
             star_rate = int((star_count / len(df_t)) * 100) if len(df_t) > 0 else 0
             st.metric("🔥 神対応・大絶賛率", f"{star_rate} %")
@@ -238,11 +235,9 @@ def render_analytics_dashboard_page():
         elif q_rate >= 50: st.info("👍 半数以上の授業でテストを実施できています。")
         else: st.warning("⚠️ 実施率が低めです。授業の冒頭で小テストを行い、結果を記録するルーティンを徹底しましょう。")
 
-        # 🌟 【新設】個別分析用の保護者リアクション詳細セクション
         st.divider()
         st.markdown(f"**💬 保護者ファン化度・エンゲージメント詳細**")
         
-        # 内訳集計
         reply_counts = df_t['保護者リアクション'].value_counts()
         
         col_r1, col_r2 = st.columns([4, 6])
@@ -251,11 +246,14 @@ def render_analytics_dashboard_page():
             for k, v in reply_counts.items():
                 st.write(f"- {k}: **{v}** 件")
         with col_r2:
-            # 講師個別の積み上げ用1行グラフ
-            df_t_pivot = pd.crosstab(df_t['担当講師'], df_t['保護者リアクション'])
-            st.bar_chart(df_t_pivot, stack=True)
+            # 🌟 修正：既読スルーを除外し、リアクションがある場合のみグラフを描画
+            df_t_react_only = df_t[df_t['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
+            if not df_t_react_only.empty:
+                df_t_pivot = pd.crosstab(df_t_react_only['担当講師'], df_t_react_only['保護者リアクション'])
+                st.bar_chart(df_t_pivot, stack=True)
+            else:
+                st.info("今月はまだ保護者からのリアクションはありません。")
             
-        # 自動フィードバック
         if star_rate >= 30:
             st.success(f"🔥 **超優秀ファンタジスタ講師！** 報告書の3割以上で保護者から大絶賛（神対応）を貰っています。保護者からの信頼が極めて厚いため、今後の提案業務などの中心人物として活躍が期待できます。")
         elif star_rate > 0 or reply_counts.get("🟢 好意的・納得（信頼構築・塾への指示通りに家庭が動く状態）", 0) > 0:
