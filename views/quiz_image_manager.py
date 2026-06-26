@@ -14,6 +14,11 @@ def cached_get_student_master():
     df = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
     return df.copy() if not df.empty else df
 
+# 🌟 新設：画像リスト取得をキャッシュ化してファイルアップローダーの通信を絶対に邪魔させない！
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_list_student_images(student_id, student_name):
+    return robust_api_call(list_student_images, student_id, student_name, fallback_value=[])
+
 def process_image_quality(file_bytes):
     """文字が読める画質をキープしたまま、サイズを適正化して超軽量化する関数"""
     try:
@@ -121,6 +126,7 @@ def render_quiz_image_manager_page():
                 status_text.empty()
                 if success_count > 0:
                     st.success(f"✅ {success_count} 枚の画像をサクサク保存完了しました！")
+                    st.cache_data.clear() # 🌟 追加：新しく保存されたので画像キャッシュを強制クリア！
                     time.sleep(1.5)
                     st.rerun()
 
@@ -130,8 +136,8 @@ def render_quiz_image_manager_page():
     st.divider()
     st.subheader("🖼️ 過去の画像ギャラリー")
     
-    with st.spinner("Google Driveから画像履歴を読み込み中..."):
-        images = robust_api_call(list_student_images, student_id, student_name, fallback_value=[])
+    # 🌟 変更：毎回生通信する古い関数から、高速なキャッシュ版関数に変更
+    images = cached_list_student_images(student_id, student_name)
 
     if not images:
         st.info("まだこの生徒のフォルダに写真はありません。")
@@ -150,7 +156,8 @@ def render_quiz_image_manager_page():
                         try:
                             dt = datetime.datetime.strptime(c_time, "%Y-%m-%dT%H:%M:%S.%fZ")
                             dt_jst = dt + datetime.timedelta(hours=9)
-                            st.caption(f"📅 {dt_jst.strftime('%Y/%m/%d %H:%M')}")
+                            Garner = dt_jst.strftime('%Y/%m/%d %H:%M')
+                            st.caption(f"📅 {Garner}")
                         except:
                             st.caption(f"📅 {c_time[:10]}")
                     
@@ -163,13 +170,11 @@ def render_quiz_image_manager_page():
                     st.markdown(f"[🔗 原寸大で確認・ダウンロード]({img.get('webViewLink')})")
                     
                     # ==========================================
-                    # 🗑️ 【新機能】誤操作防止付き画像削除エリア
+                    # 🗑️ 誤操作防止付き画像削除エリア
                     # ==========================================
-                    # ポップオーバーを使うことで、誤ってボタンに触れても即削除される事故を防ぎます
                     with st.popover("🗑️ この画像を削除", use_container_width=True):
                         st.warning("⚠️ 本当に削除しますか？\nGoogle Driveから完全に消去され、元に戻せなくなります。")
                         
-                        # 画像ごとの一意のID（img.get('id')）をキーにしてボタンを生成
                         if st.button("🔴 完全に削除する", key=f"del_{img.get('id')}", use_container_width=True):
                             with st.spinner("Driveから削除中..."):
                                 success = robust_api_call(
@@ -179,7 +184,8 @@ def render_quiz_image_manager_page():
                                 )
                                 if success:
                                     st.success("削除しました！")
+                                    st.cache_data.clear() # 🌟 追加：削除が成功したので画像キャッシュを強制クリア！
                                     time.sleep(1)
-                                    st.rerun() # ギャラリーを最新状態にするために再読み込み
+                                    st.rerun() 
                                 else:
                                     st.error("通信エラーにより削除できませんでした。")
