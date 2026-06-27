@@ -20,7 +20,6 @@ from utils.api_guard import robust_api_call
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=60, show_spinner=False)
 def cached_load_quiz_records():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 

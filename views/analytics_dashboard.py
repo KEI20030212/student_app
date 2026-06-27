@@ -20,7 +20,7 @@ def calculate_page_amount(text):
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=60)
+# 🌟 修正：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_load_quiz_records():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
@@ -34,7 +34,7 @@ def render_analytics_dashboard_page():
         st.header("📊 講師パフォーマンス分析ダッシュボード")
     with col_r:
         if st.button("🔄 データを更新", use_container_width=True):
-            st.cache_data.clear() 
+            st.cache_data.clear()
             st.rerun()            
 
     st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」「小テスト実施率」「保護者ファン化度」を可視化します。")
@@ -156,7 +156,6 @@ def render_analytics_dashboard_page():
         
         df_react_only = df_month[df_month['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
         
-        # 🌟 修正：リアクションが1件でも存在する場合のみピボット集計を実行（ValueError防止ガード）
         if not df_react_only.empty:
             df_pivot = pd.crosstab(df_react_only['担当講師'], df_react_only['保護者リアクション'])
             
@@ -249,7 +248,6 @@ def render_analytics_dashboard_page():
             for k, v in reply_counts.items():
                 st.write(f"- {k}: **{v}** 件")
         with col_r2:
-            # 🌟 修正：ここも既読スルーを除外したデータが空でない場合のみグラフを描画
             df_t_react_only = df_t[df_t['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
             if not df_t_react_only.empty:
                 df_t_pivot = pd.crosstab(df_t_react_only['担当講師'], df_t_react_only['保護者リアクション'])

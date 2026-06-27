@@ -6,8 +6,8 @@ import re
 
 from utils.g_sheets import (
     get_student_master, 
-    get_quiz_master_dict,                 
-    save_quizzes_to_dedicated_sheet,  # 🌟 修正：先ほど作ったバルクインサート関数（複数形）に変更！
+    get_quiz_master_dict,                
+    save_quizzes_to_dedicated_sheet,  
     load_quiz_records,
     get_textbook_master
 )
@@ -20,7 +20,7 @@ def cached_get_student_master():
 def cached_get_quiz_details():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 
-@st.cache_data(ttl=60)   
+# 🌟 修正1：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_load_all_quizzes():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
@@ -43,10 +43,8 @@ def render_quiz_list_page():
 
     student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
     
-    # 🌟 修正ポイント： ["-- 選択 --"] をリストから消し、index=None と placeholder を設定！
     selected_student_option = st.selectbox("👤 生徒を選択", student_options, index=None, placeholder="-- 生徒を選択 --")
     
-    # 🌟 修正ポイント： 選択されていない（None）場合はここで処理を止める
     if selected_student_option is None:
         st.stop()
 
@@ -91,7 +89,6 @@ def render_quiz_list_page():
                         st.error("⚠️ 「単元・回」を入力してください。")
                     else:
                         with st.spinner("記録中..."):
-                            # 🌟 修正：データを二次元リスト（1行分だけのリスト）の形に梱包する
                             quiz_row_data = [[
                                 test_date.strftime("%Y/%m/%d"), 
                                 student_name,  
@@ -102,7 +99,6 @@ def render_quiz_list_page():
                                 "自習"
                             ]]
                             
-                            # 🌟 修正：バルクインサート関数に箱ごと渡す！
                             success = robust_api_call(
                                 save_quizzes_to_dedicated_sheet,
                                 quiz_row_data,
@@ -111,7 +107,8 @@ def render_quiz_list_page():
                             
                             if success:
                                 st.success(f"【{target_quiz} - {target_unit}】を {score}点で記録しました！")
-                                cached_load_all_quizzes.clear() 
+                                # 🌟 修正2：大元の関数（load_quiz_records）のキャッシュを確実に破壊する！
+                                load_quiz_records.clear() 
                                 time.sleep(1)
                                 st.rerun()
                             else:
