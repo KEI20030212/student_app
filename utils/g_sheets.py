@@ -1093,6 +1093,7 @@ def save_trial_lesson_to_spreadsheet(date, student_name, subject, text_name, adv
         return False
 
 #dashboard.py
+@st.cache_data(ttl=60, show_spinner=False)
 def load_quiz_records():
     """
     全員共通の「小テスト記録」シートから全データを読み込む
