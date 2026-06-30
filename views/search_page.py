@@ -7,7 +7,7 @@ from utils.g_sheets import (
     get_student_master,
     get_all_logs,          
     delete_specific_log,
-    load_quiz_records  # 🌟 追加：小テスト記録の読み込み関数
+    load_quiz_records  
 )
 from utils.api_guard import robust_api_call
 
@@ -42,14 +42,41 @@ def render_search_page():
     if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:
         student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
 
-    if st.session_state.get('role') == 'admin':
-        with st.expander("🗑️ 間違えて入力した授業記録を削除する (教室長のみ)"):
-            st.warning("※スプレッドシートから直接データを消去します。元には戻せません。")
+    # ==========================================
+    # 🌟 削除機能（役職による期間制限を実装！）
+    # ==========================================
+    user_role = st.session_state.get('role', '')
+    allowed_roles = ['admin', 'owner', 'am', 'head_teacher']
+
+    if user_role in allowed_roles:
+        with st.expander("🗑️ 間違えて入力した授業記録を削除する"):
+            today = datetime.date.today()
+            
+            # 🌟 役職によって日付ピッカーの選択可能範囲を制限
+            if user_role == 'admin':
+                st.warning("※スプレッドシートから直接データを消去します。元には戻せません。")
+                min_del_date = today - datetime.timedelta(days=3650) # 管理者は過去10年分OK
+                max_del_date = today
+            else:
+                st.warning("⚠️ 安全対策のため、削除できるのは【今日と昨日】の記録のみです。")
+                min_del_date = today - datetime.timedelta(days=1)    # 他の役職は昨日まで
+                max_del_date = today
+
+            st.info("💡 **二重登録（重複）を消したい場合:** \n全く同じ授業記録が2つ重複して登録されてしまった場合、このボタンを1回押すと**最新の1行だけ**が削除され、もう1行は安全に残ります（2行同時に消えることはありません）。")
+            
             with st.form("delete_log_form"):
                 d_col1, d_col2, d_col3 = st.columns(3)
                 
                 del_student_option = d_col1.selectbox("削除する生徒", student_options if student_options else ["-- データなし --"])
-                del_date = d_col2.date_input("間違えた授業日", datetime.date.today())
+                
+                # 📅 カレンダーの範囲を min_value, max_value でロック！
+                del_date = d_col2.date_input(
+                    "間違えた授業日", 
+                    value=today,
+                    min_value=min_del_date,
+                    max_value=max_del_date
+                )
+                
                 time_slots = [
                     "Aコマ目 (9:30~11:00)", "Bコマ目 (11:10~12:40)",
                     "0コマ目 (13:10~14:40)", "1コマ目 (14:50~16:20)",
@@ -69,7 +96,7 @@ def render_search_page():
                             success = robust_api_call(delete_specific_log, del_id, del_name, date_str, del_period, fallback_value=False)
                             
                         if success:
-                            st.success(f"✅ {date_str} の {del_name} さん ({del_period}) の記録を削除しました！")
+                            st.success(f"✅ {date_str} の {del_name} さん ({del_period}) の記録を1行削除しました！")
                             st.cache_data.clear()
                             time.sleep(1.5)
                             st.rerun()
@@ -82,11 +109,11 @@ def render_search_page():
         st.warning("生徒が登録されていません。（または通信エラーによりデータを取得できませんでした）")
         return
 
-    # 🌟 変更点: 大元のタブ構造を作成して、授業記録と小テスト記録を分離
+    # 🌟 大元のタブ構造を作成して、授業記録と小テスト記録を分離
     tab_lesson, tab_quiz = st.tabs(["📝 授業記録の検索", "💯 小テスト記録の検索"])
 
     # ==========================================
-    # 📝 タブ1: 授業記録の検索（既存の全ロジック）
+    # 📝 タブ1: 授業記録の検索
     # ==========================================
     with tab_lesson:
         with st.spinner("授業データベースから読み込み中...🚀"):
@@ -194,7 +221,7 @@ def render_search_page():
                     st.warning("⚠️ 表示項目が何も選択されていません。項目を1つ以上選択してください。")
 
     # ==========================================
-    # 💯 タブ2: 小テスト記録の検索（新規バルク対応）
+    # 💯 タブ2: 小テスト記録の検索
     # ==========================================
     with tab_quiz:
         with st.spinner("小テストデータベースから読み込み中...🚀"):
@@ -206,7 +233,6 @@ def render_search_page():
         else:
             df_quiz['日時'] = pd.to_datetime(df_quiz['日時'], format='mixed', errors='coerce')
             
-            # 名前列の統一処理
             if '名前' in df_quiz.columns:
                 if '生徒名' in df_quiz.columns:
                     df_quiz = df_quiz.drop(columns=['名前'])
@@ -225,7 +251,6 @@ def render_search_page():
                 selected_q_student = cq2.selectbox("👤 生徒名", q_students, key="quiz_student")
 
                 st.write("")
-                # 小テスト用の表示項目カスタマイズ
                 quiz_columns_list = ["日時", "生徒名", "テキスト", "単元", "点数", "ミス問題番号", "タイミング"]
                 available_q_cols = [col for col in quiz_columns_list if col in df_quiz.columns or col == "日時"]
                 default_q_cols = [col for col in ["日時", "生徒名", "テキスト", "単元", "点数"] if col in available_q_cols]
@@ -249,7 +274,6 @@ def render_search_page():
             df_q_filtered['日時'] = df_q_filtered['日時'].dt.strftime('%Y/%m/%d')
             df_q_display = df_q_filtered.fillna("")
 
-            # お留守番表示（Empty State）
             if df_q_display.empty:
                 st.info("💡 指定された条件の小テスト記録は見つかりませんでした。\n日付の範囲を広げるか、別の生徒を選択してみてください。")
             else:
