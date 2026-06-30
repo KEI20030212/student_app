@@ -720,6 +720,7 @@ def add_new_textbook(new_name):
         st.error(f"🚨 新規テキストの裏側でエラー発生: {e}")
         return False
 
+@st.cache_data(ttl=600, show_spinner=False)
 def get_textbook_master():
     """テキストと章、および単元名を取得する"""
     try:
