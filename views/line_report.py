@@ -16,7 +16,7 @@ from utils.g_sheets import (
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
 
-@st.cache_data(ttl=60, show_spinner=False)
+# 🌟 修正箇所：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -30,7 +30,6 @@ def cached_load_hw_records():
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-# 🌟 修正箇所：二重キャッシュを撤去し、list()で原本を保護！
 def safe_get_teacher_names():
     lst = robust_api_call(get_all_teacher_names, fallback_value=[])
     return list(lst)
