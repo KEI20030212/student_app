@@ -36,7 +36,7 @@ def safe_get_teacher_names():
     lst = robust_api_call(get_all_teacher_names, fallback_value=[])
     return list(lst)
 
-@st.cache_data(ttl=600, show_spinner=False)
+# 🌟 修正：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_textbook_master():
     dct = robust_api_call(get_textbook_master, fallback_value={})
     return dict(dct)
@@ -140,7 +140,7 @@ def render_multi_input_page():
         st.warning("🚨 **【重要】離席時の注意**\n\n一定時間でサーバーがスリープします。**入力途中で離席する際は必ず「☁️ 保存」を押してください！**")
 
     if last_saved_time:
-        st.error("⚠️ **前回中断した入力データがクラウドに残っています！** 続きから入力する場合は、左メニューの「📂 復元」を先に押してください。")
+        st.error("⚠️ **前回中断した入力データがクラウドに残っています！** 続きから入力する場合は、左メニュー of 「📂 復元」を先に押してください。")
 
     student_df = cached_get_student_master()
     if not student_df.empty:
@@ -270,7 +270,7 @@ def render_multi_input_page():
                                     st.warning("欠席のため、進捗・テスト入力はスキップされます。")
                                     input_data_list.append({
                                         "original_idx": i, 
-                                        "student_id" : student_id, "name": name, "subject": "-", "text_name": "-", "advanced_p": "-", 
+                                        "student_id": student_id, "name": name, "subject": "-", "text_name": "-", "advanced_p": "-", 
                                         "quiz_records": [], "w_nums_for_sheet": "", "attendance": attendance,
                                         "late_time": late_time, "concentration": "-", "reaction": "-",
                                         "advice": "-", "parent_msg": "-", "next_handover": "-",
@@ -363,7 +363,7 @@ def render_multi_input_page():
                                                     is_hw_forgotten = st.checkbox("❌ 忘れた・やってない", key=f"hw_forgot_{b}_{i}")
                                                 
                                                 if is_continuous:
-                                                    st.caption("※次回の宿題指示にそのまま引き継ぎます。")
+                                                    st.caption("※次回の宿題指示にそのまま引き継ぎします。")
                                                     assigned_p = 0 
                                                 elif is_hw_forgotten:
                                                     completed_p = 0
@@ -389,7 +389,7 @@ def render_multi_input_page():
                                                             if d_end >= d_start and d_end > 0:
                                                                 completed_p += (d_end - d_start + 1)
                                                         
-                                                    st.caption(f"📊 出した宿題: **{assigned_p}** P / やった宿題: **{completed_p}** P")
+                                                st.caption(f"📊 出した宿題: **{assigned_p}** P / やった宿題: **{completed_p}** P")
 
                                                 hw_reason_val = ""
                                                 hw_fix_val = ""
@@ -408,7 +408,7 @@ def render_multi_input_page():
                                                     
                                                     with r_col2:
                                                         fix_sel = st.selectbox("本日の修正策", ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"], key=f"hw_fix_sel_{b}_{i}")
-                                                        if fix_sel == "その他":
+                                                        if fix_sel == "other":
                                                             fix_other = st.text_input("修正策（その他）", key=f"hw_fix_other_{b}_{i}")
                                                             hw_fix_val = f"その他: {fix_other}" if fix_other else "その他"
                                                         else:
@@ -426,7 +426,8 @@ def render_multi_input_page():
                                                     selected_texts.remove("🆕 新規テキスト入力")
                                                     if new_usage_text not in selected_texts:
                                                         selected_texts.append(new_usage_text)
-                                                cached_get_textbook_master.clear()
+                                                    # 🌟 修正：二重キャッシュ防止のため、大元のクリア処理へ変更
+                                                    get_textbook_master.clear()
 
                                             advanced_p_list = []
                                             if selected_texts and "🆕 新規テキスト入力" not in selected_texts:
@@ -530,7 +531,7 @@ def render_multi_input_page():
                                             if is_trial:
                                                 st.info("🔰 体験生モード：次回の宿題指示はスキップされます。")
                                             else:
-                                                st.write("🚀 **次回の宿題指示**")
+                                                st.write("🚀 **次回の宿宿指示**")
                                                 if is_continuous:
                                                     selected_hw_text_str = str(last_hw_text)
                                                     next_hw_pages_str = str(last_hw_pages)
@@ -680,12 +681,12 @@ def render_multi_input_page():
                         date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
                         
                         for data in input_data_list:
-                            o_idx = data["original_idx"]
+                            options_idx = data["original_idx"]
                             
                             # 欠席者や保存済みの人はスキップ
-                            if "欠席" in data.get("attendance", "") or st.session_state.get(f"saved_flag_{b}_{o_idx}", False):
-                                st.session_state[f"saved_flag_{b}_{o_idx}"] = True
-                                st.session_state[f"saved_att_{b}_{o_idx}"] = data.get("attendance", "")
+                            if "欠席" in data.get("attendance", "") or st.session_state.get(f"saved_flag_{b}_{options_idx}", False):
+                                st.session_state[f"saved_flag_{b}_{options_idx}"] = True
+                                st.session_state[f"saved_att_{b}_{options_idx}"] = data.get("attendance", "")
                                 continue
 
                             # 🌟 メインログデータを24列のリストに梱包して箱に入れる
@@ -736,9 +737,9 @@ def render_multi_input_page():
                                 except Exception:
                                     pass 
                                     
-                            st.session_state[f"saved_flag_{b}_{o_idx}"] = True
-                            st.session_state[f"saved_name_{b}_{o_idx}"] = data["name"]
-                            st.session_state[f"saved_att_{b}_{o_idx}"] = data.get("attendance", "")
+                            st.session_state[f"saved_flag_{b}_{options_idx}"] = True
+                            st.session_state[f"saved_name_{b}_{options_idx}"] = data["name"]
+                            st.session_state[f"saved_att_{b}_{options_idx}"] = data.get("attendance", "")
 
                         # ==========================================
                         # 📦 箱に溜まったデータを、それぞれ一発でGoogleに納品！

@@ -28,15 +28,17 @@ from utils.calc_logic import (
 from utils.api_guard import robust_api_call
 
 # --- 🚀 キャッシュ関数 ---
-@st.cache_data(ttl=600, show_spinner=False)
+
+# 🌟 修正: 二重キャッシュ防止のためデコレータを削除
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
+# 🌟 修正: 二重キャッシュ防止＆原本保護のため list() で返す
 def cached_get_teacher_names():
-    return robust_api_call(get_all_teacher_names, fallback_value=[])
+    lst = robust_api_call(get_all_teacher_names, fallback_value=[])
+    return list(lst)
 
-@st.cache_data(ttl=600, show_spinner=False)
+# 🌟 修正: 二重キャッシュ防止のためデコレータを削除
 def cached_get_textbook_master():
     return robust_api_call(get_textbook_master, fallback_value={})
 
@@ -48,7 +50,7 @@ def cached_get_quiz_master():
 def cached_get_type_advice():
     return robust_api_call(get_type_advice_dict, fallback_value={})
 
-@st.cache_data(ttl=60, show_spinner=False)
+# 🌟 修正: 二重キャッシュ防止のためデコレータを削除
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -185,7 +187,8 @@ def render_group_input_page():
                         robust_api_call(add_new_textbook, new_text)
                         g_selected_texts.remove("🆕 新規テキスト入力")
                         if new_text not in g_selected_texts: g_selected_texts.append(new_text)
-                        cached_get_textbook_master.clear()
+                        # 🌟 修正: 大元の関数キャッシュをクリアするよう変更
+                        get_textbook_master.clear()
 
                 g_advanced_p_list = []
                 if g_selected_texts and "🆕 新規テキスト入力" not in g_selected_texts:
@@ -366,7 +369,7 @@ def render_group_input_page():
                                     d_s = cd1.number_input("やった開始P", value=hw['start'], min_value=0, key=f"s_d_s_{b}_{i}_{h_idx}")
                                     d_e = cd2.number_input("やった終了P", value=hw['end'], min_value=0, key=f"s_d_e_{b}_{i}_{h_idx}")
                                     if d_e >= d_s and d_e > 0: completed_p += (d_e - d_s + 1)
-                            st.caption(f"📊 出した宿題: {assigned_p} P / やった宿題: {completed_p} P")
+                        st.caption(f"📊 出した宿題: {assigned_p} P / やった宿題: {completed_p} P")
 
                         hw_reason_val, hw_fix_val = "", ""
                         if (assigned_p > 0 and completed_p < assigned_p) or is_hw_forgotten:

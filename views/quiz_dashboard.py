@@ -20,11 +20,9 @@ def cached_get_student_master():
 def cached_get_quiz_details():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 
-# 🌟 修正1：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_load_all_quizzes():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
-
-@st.cache_data(ttl=600)  
+  
 def cached_get_textbook_master():
     return robust_api_call(get_textbook_master, fallback_value={})
 

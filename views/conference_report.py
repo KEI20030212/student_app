@@ -39,7 +39,7 @@ def safe_load_test_scores():
     from utils.g_sheets import load_test_scores
     return robust_api_call(load_test_scores, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
+# 🌟 修正箇所：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_textbook_master():
     from utils.g_sheets import get_textbook_master
     return robust_api_call(get_textbook_master, fallback_value={})
