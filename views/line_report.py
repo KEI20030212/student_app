@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import datetime
 import pandas as pd
 import time
@@ -16,7 +16,6 @@ from utils.g_sheets import (
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
 
-# 🌟 修正箇所：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -36,14 +35,13 @@ def safe_get_teacher_names():
 
 
 def render_line_report_page():
-    # 🌟 変更ポイント：ヘッダーの横にリロードボタンを配置
     col_h, col_r = st.columns([0.8, 0.2])
     with col_h:
         st.header("📱 LINE用 授業報告レポート管理")
     with col_r:
         if st.button("🔄 データを更新", use_container_width=True):
-            st.cache_data.clear() # キャッシュを強制クリア
-            st.rerun()            # 画面を再読み込み
+            st.cache_data.clear() 
+            st.rerun()            
     
     user_role = st.session_state.get('role', '')
     
@@ -101,7 +99,6 @@ def render_line_report_page():
                     s_name = s.get(name_col, "不明")
                     s_id = s.get(id_col, "未設定")
                     
-                    # 🌟 追加：Myeトレ受講生をアラートから外すための事前チェック
                     student_classes_today = daily_logs[daily_logs[id_col].astype(str) == str(s_id)]
                     used_myetore = any("Myeトレ" in str(row.get("テキスト", "")) for _, row in student_classes_today.iterrows())
                     
@@ -112,7 +109,6 @@ def render_line_report_page():
                         if not student_quizzes.empty:
                             has_quiz = True
                             
-                    # 小テストがなく、かつMyeトレも使っていない生徒のみアラート対象にする
                     if not has_quiz and not used_myetore:
                         missing_url_students.append(s_name)
                         
@@ -143,7 +139,7 @@ def render_line_report_page():
                         student_classes = daily_logs[daily_logs[id_col].astype(str) == str(student_id)]
                         class_sections = []; advice_sections = []; hw_sections = []; parent_msg_sections = []; bring_sections = []
                         
-                        is_myetore_used = False # 🌟 追加：この生徒がMyeトレを使ったかどうかのフラグ
+                        is_myetore_used = False 
 
                         for _, row in student_classes.iterrows():
                             teacher = row.get("担当講師", "（未入力）")
@@ -155,7 +151,7 @@ def render_line_report_page():
                             end_page = str(row.get("終了ページ", "")).strip()
                             if end_page == "nan": end_page = ""
                             
-                            if "Myeトレ" in text_name: # 🌟 追加：Myeトレ使用フラグをON
+                            if "Myeトレ" in text_name: 
                                 is_myetore_used = True
                             
                             if end_page:
@@ -189,15 +185,19 @@ def render_line_report_page():
                             class_text = f"{prefix}（{period} / {subject} / 担当：{teacher}）\n・進捗：{progress}\n・様子：{attitude}{hw_status_line}"
                             class_sections.append(class_text)
 
-                        if advice and advice != "nan": advice_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{advice}")
-                        if parent_msg and parent_msg != "nan": parent_msg_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{parent_msg}")
-                        if hw_content: hw_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{hw_content}")
+                            # 🌟 修正：if文のインデントを1段下げてforループの「内側」に移動！
+                            # これにより、毎コマのアドバイスや宿題が上書きされず漏れなく追加されます
+                            if advice and advice != "nan" and advice != "": 
+                                advice_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{advice}")
+                            if parent_msg and parent_msg != "nan" and parent_msg != "": 
+                                parent_msg_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{parent_msg}")
+                            if hw_content: 
+                                hw_sections.append(f"《{subject if bucket_name != '体験授業' else ''} {teacher}先生より》\n{hw_content}")
 
                         classes_text = "\n\n".join(class_sections)
                         bring_text = f"🎒 【次回の持ち物】\n" + "\n".join(bring_sections) + "\n\n" if bring_sections else ""
                         hw_text = f"📘 【次回の宿題】\n" + "\n\n".join(hw_sections) + "\n\n" if hw_sections else ""
 
-                        # 🌟 改修ポイント：小テスト結果の組み立てロジック
                         quiz_text = "小テストは実施していません"
                         drive_url_line = ""
                         quiz_results_list = []
@@ -250,7 +250,7 @@ def render_line_report_page():
             
             df_students_raw = cached_get_student_master()
             df_students = df_students_raw.copy()
-            teacher_names = safe_get_teacher_names() # 🌟 関数名を変更！
+            teacher_names = safe_get_teacher_names() 
             
             if df_students.empty:
                 st.warning("生徒データが読み込めません。")
