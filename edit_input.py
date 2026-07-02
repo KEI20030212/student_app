@@ -9,7 +9,7 @@ from utils.g_sheets import (
     load_quiz_records,            
     get_quiz_master_dict,         
     update_quiz_record_in_sheet,
-    get_all_teacher_names # 🌟 講師名リスト取得
+    get_all_teacher_names 
 )
 from utils.api_guard import robust_api_call
 
@@ -162,7 +162,17 @@ def render_edit_input_page():
             
             day_quizzes = []
             if not df_quizzes.empty and '名前' in df_quizzes.columns and '日時' in df_quizzes.columns:
-                mask = (df_quizzes['名前'] == record.get('名前')) & (df_quizzes['日時'].astype(str).str.startswith(date_str))
+                # 🌟 現在修正中の授業レコードから「1コマ目」などの文字列を抽出
+                current_slot = str(record.get('授業コマ', '')).split(" ")[0]
+                # 小テスト側の列名を特定（古いデータにも対応するため）
+                slot_col = 'タイミング' if 'タイミング' in df_quizzes.columns else '実施形態' if '実施形態' in df_quizzes.columns else df_quizzes.columns[-1]
+                
+                # 🌟 抽出条件：この授業コマ（または昔の"授業内"データ）に完全一致するものだけを狙い撃ち！
+                mask = (
+                    (df_quizzes['名前'] == record.get('名前')) & 
+                    (df_quizzes['日時'].astype(str).str.startswith(date_str)) &
+                    (df_quizzes[slot_col].astype(str).isin([current_slot, "授業内"]))
+                )
                 day_quizzes = df_quizzes[mask].to_dict('records')
             
             edited_quizzes = []
@@ -177,16 +187,15 @@ def render_edit_input_page():
                     if matched_marks:
                         current_max = int(pd.Series(matched_marks).mode()[0])
                         
-                    st.caption(f"📝 **{q_name}**")
-                    col_q1, col_q2 = st.columns(2)
-                    with col_q1:
-                        # 🌟 修正：キーに一意のレコード番号「idx」を含めて混線を完全防止！
-                        new_unit = st.number_input(f"単元/回", value=int(old_unit) if str(old_unit).isdigit() else 1, key=f"edit_q_unit_{idx}_{q_idx}")
-                    with col_q2:
-                        safe_old_score = int(old_score) if str(old_score).isdigit() else 0
-                        safe_max = max(current_max, safe_old_score)
-                        # 🌟 修正：キーに一意のレコード番号「idx」を含めて混線を完全防止！
-                        new_score = st.number_input(f"点数 (/{current_max}点満点)", min_value=0, max_value=safe_max, value=safe_old_score, key=f"edit_q_score_{idx}_{q_idx}")
+                    with st.container(border=True):
+                        st.write(f"✏️ **【{q_name}】**")
+                        col_q1, col_q2 = st.columns(2)
+                        with col_q1:
+                            new_unit = st.number_input(f"単元/回", value=int(old_unit) if str(old_unit).isdigit() else 1, key=f"edit_q_unit_{idx}_{q_idx}")
+                        with col_q2:
+                            safe_old_score = int(old_score) if str(old_score).isdigit() else 0
+                            safe_max = max(current_max, safe_old_score)
+                            new_score = st.number_input(f"点数 (/{current_max}点満点)", min_value=0, max_value=safe_max, value=safe_old_score, key=f"edit_q_score_{idx}_{q_idx}")
                     
                     edited_quizzes.append({
                         "quiz_name": q_name,
@@ -196,7 +205,7 @@ def render_edit_input_page():
                         "new_score": new_score
                     })
             else:
-                st.info("この日の小テスト記録はありません。")
+                st.info("この授業コマで記録された小テストはありません。")
 
             st.divider()
             st.write("🧠 **授業中の様子・評価**")
