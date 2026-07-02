@@ -437,9 +437,11 @@ def render_group_input_page():
                                 # 小テストのバルク送信（1人分だけでも配列に入れてバルク関数を使う）
                                 if quiz_records:
                                     single_quiz_rows = []
+                                    # 🌟 変更箇所1：授業コマから「1コマ目」などを抽出
+                                    slot_short = class_slot.split(" ")[0] if class_slot else "授業内"
                                     for q in quiz_records:
                                         single_quiz_rows.append([
-                                            date.strftime("%Y/%m/%d"), name, q["quiz_name"], q["unit"], q["score"], "", "授業内"
+                                            date.strftime("%Y/%m/%d"), name, q["quiz_name"], q["unit"], q["score"], "", slot_short
                                         ])
                                     robust_api_call(save_quizzes_to_dedicated_sheet, single_quiz_rows)
                                     
@@ -513,6 +515,8 @@ def render_group_input_page():
 
                             # 🌟 小テストデータも箱に入れる
                             if data.get("quiz_records") and len(data["quiz_records"]) > 0:
+                                # 🌟 変更箇所2：授業コマから「1コマ目」などを抽出
+                                slot_short = class_slot.split(" ")[0] if class_slot else "授業内"
                                 for q in data["quiz_records"]:
                                     all_class_quiz_rows.append([
                                         date_str,
@@ -521,7 +525,7 @@ def render_group_input_page():
                                         q["unit"],
                                         q["score"],
                                         "",
-                                        "授業内"
+                                        slot_short
                                     ])
                                     
                             # （※宿題達成率の更新は個別APIなのでここで回す）

@@ -36,7 +36,6 @@ def safe_get_teacher_names():
     lst = robust_api_call(get_all_teacher_names, fallback_value=[])
     return list(lst)
 
-# 🌟 修正：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_textbook_master():
     dct = robust_api_call(get_textbook_master, fallback_value={})
     return dict(dct)
@@ -426,7 +425,6 @@ def render_multi_input_page():
                                                     selected_texts.remove("🆕 新規テキスト入力")
                                                     if new_usage_text not in selected_texts:
                                                         selected_texts.append(new_usage_text)
-                                                    # 🌟 修正：二重キャッシュ防止のため、大元のクリア処理へ変更
                                                     get_textbook_master.clear()
 
                                             advanced_p_list = []
@@ -531,7 +529,7 @@ def render_multi_input_page():
                                             if is_trial:
                                                 st.info("🔰 体験生モード：次回の宿題指示はスキップされます。")
                                             else:
-                                                st.write("🚀 **次回の宿宿指示**")
+                                                st.write("🚀 **次回の宿題指示**")
                                                 if is_continuous:
                                                     selected_hw_text_str = str(last_hw_text)
                                                     next_hw_pages_str = str(last_hw_pages)
@@ -637,9 +635,12 @@ def render_multi_input_page():
                                                     # 小テストのバルク送信（1人分だけでも配列に入れてバルク関数を使う）
                                                     if quiz_records and len(quiz_records) > 0:
                                                         single_quiz_rows = []
+                                                        # 🌟 修正：固定文字ではなく、授業コマから「1コマ目」などを抽出
+                                                        slot_short = class_slot.split(" ")[0] if class_slot else "授業内"
+                                                        
                                                         for q in quiz_records:
                                                             single_quiz_rows.append([
-                                                                date.strftime("%Y/%m/%d"), name, q["quiz_name"], q["unit"], q["score"], "", "授業内"
+                                                                date.strftime("%Y/%m/%d"), name, q["quiz_name"], q["unit"], q["score"], "", slot_short
                                                             ])
                                                         robust_api_call(save_quizzes_to_dedicated_sheet, single_quiz_rows)
                                                     
@@ -719,6 +720,9 @@ def render_multi_input_page():
 
                             # 🌟 小テストデータも箱に入れる
                             if data.get("quiz_records") and len(data["quiz_records"]) > 0:
+                                # 🌟 修正：固定文字ではなく、授業コマから「1コマ目」などを抽出
+                                slot_short = class_slot.split(" ")[0] if class_slot else "授業内"
+                                
                                 for q in data["quiz_records"]:
                                     all_class_quiz_rows.append([
                                         date_str,
@@ -727,7 +731,7 @@ def render_multi_input_page():
                                         q["unit"],
                                         q["score"],
                                         "",
-                                        "授業内"
+                                        slot_short
                                     ])
                                     
                             # （※宿題達成率の更新は個別APIなのでここで回す）
