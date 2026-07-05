@@ -2,12 +2,14 @@ import streamlit as st
 import pandas as pd
 import time
 import datetime
+import re 
 
 from utils.g_sheets import (
     load_board_message,
     save_board_message,
     get_all_logs,      
-    load_quiz_records  
+    load_quiz_records,
+    load_transfer_requests 
 )
 from utils.api_guard import robust_api_call
 
@@ -19,15 +21,100 @@ def safe_load_quiz_records():
     df = robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
     return df.copy() if not df.empty else df
 
+# 🌟 修正：シートIDを受け取ってデータを読み込むように変更
+def safe_load_transfer_requests(sheet_id):
+    df = robust_api_call(load_transfer_requests, sheet_id, fallback_value=pd.DataFrame())
+    return df.copy() if not df.empty else df
+
 def render_home_page():
     st.header("📢 連絡掲示板")
     
     user_role = st.session_state.get('role', '')
 
     # ==========================================
-    # 🌟 管理者専用：URL抜け（小テスト未実施）の自動検知アラート
+    # 🌟 1. オーナー・管理者専用：振替申請アラート
     # ==========================================
-    if user_role in ['admin', 'owner', 'head_teacher']:
+    if user_role in ['admin', 'owner']:
+        
+        # 🌟 ここで2校舎分のスプレッドシートIDを設定！
+        TABATA_SHEET_ID = "1j93KTSKjywAQoslEPt-osRMzOMSiheb8GrT77gLgPko" 
+        HIGASHI_JUJO_SHEET_ID = "1lY7t4gmeFClaWuVOC1DUb-18d3rK81OU5P_F5DabJeQ"
+        
+        col_t1, col_t2 = st.columns([0.8, 0.2], vertical_alignment="bottom")
+        with col_t1:
+            st.subheader("🛎️ 振替申請アラート")
+        with col_t2:
+            if st.button("🔄 最新を確認", key="btn_update_transfers", use_container_width=True):
+                # load_transfer_requests の全キャッシュ（両校舎分）を一撃でクリア
+                load_transfer_requests.clear()
+                st.rerun()
+
+        # 🌟 共通化：アラート表示用の専用関数（コードが長くなるのを防ぐためのスマートな仕組み）
+        def render_transfer_alerts(df_transfers, branch_name, sheet_id):
+            if not df_transfers.empty:
+                df_transfers.columns = df_transfers.columns.str.strip().str.replace('\n', '')
+                df_transfers = df_transfers.fillna("")
+                
+                if 'タイムスタンプ' in df_transfers.columns:
+                    df_transfers['タイムスタンプ_dt'] = pd.to_datetime(df_transfers['タイムスタンプ'], format='mixed', errors='coerce')
+                    
+                    seven_days_ago = pd.Timestamp.now() - pd.Timedelta(days=7)
+                    recent_transfers = df_transfers[df_transfers['タイムスタンプ_dt'] >= seven_days_ago].sort_values('タイムスタンプ_dt', ascending=False)
+                    
+                    if not recent_transfers.empty:
+                        st.warning(f"🔔 【{branch_name}】直近7日以内に **{len(recent_transfers)}件** の申請が届いています！")
+                        
+                        for _, row in recent_transfers.iterrows():
+                            dt_val = row['タイムスタンプ_dt']
+                            ts = dt_val.strftime('%m/%d %H:%M') if pd.notna(dt_val) else "不明"
+                            
+                            student = str(row.get('生徒氏名', '不明')).strip()
+                            
+                            absent_date_raw = str(row.get('欠席予定の授業日', '不明')).strip()
+                            absent_date = absent_date_raw.split(' ')[0] if absent_date_raw else "不明"
+                            absent_time = str(row.get('欠席予定の授業時間', '')).strip()
+                            
+                            with st.expander(f"👤 {student} 様 （送信: {ts} / 欠席予定: {absent_date}）"):
+                                st.markdown(f"**■ 欠席予定:** {absent_date} {absent_time}")
+                                st.markdown(f"**■ 理由:** {row.get('お振替の理由', '')}")
+                                
+                                hope_days = []
+                                for col in df_transfers.columns:
+                                    if "曜日" in col and "[" in col and "]" in col:
+                                        val = str(row.get(col, '')).strip()
+                                        if val: 
+                                            day_match = re.search(r'\[(.*?)\]', col)
+                                            day_name = day_match.group(1) if day_match else col
+                                            hope_days.append(f"{day_name}: {val}")
+                                
+                                if hope_days:
+                                    st.markdown(f"**■ 振替希望:**\n" + " \n".join([f"- {h}" for h in hope_days]))
+                                    
+                                st.markdown(f"**■ 希望時間:** {row.get('お振替希望授業時間', '')}")
+                                st.markdown(f"**■ 備考:** {row.get('備考欄', '')}")
+                                # 🌟 リンク先も指定された校舎のIDに自動で変わるように設定
+                                st.markdown(f"[🔗 スプレッドシートで全回答を確認する](https://docs.google.com/spreadsheets/d/{sheet_id}/edit)")
+                    else:
+                        st.info(f"💡 【{branch_name}】直近7日以内の新しい振替申請はありません。")
+            else:
+                st.info(f"💡 【{branch_name}】まだデータがありません。（またはシートが見つかりません）")
+
+        # 🌟 タブを廃止し、縦に並べて表示するように変更
+        with st.container(border=True):
+            st.markdown("#### 🏫 田端新町校")
+            df_tabata = safe_load_transfer_requests(TABATA_SHEET_ID)
+            render_transfer_alerts(df_tabata, "田端新町校", TABATA_SHEET_ID)
+            
+            st.write("") # 少し余白をあける
+            
+            st.markdown("#### 🏫 東十条駅前校")
+            df_higashi = safe_load_transfer_requests(HIGASHI_JUJO_SHEET_ID)
+            render_transfer_alerts(df_higashi, "東十条駅前校", HIGASHI_JUJO_SHEET_ID)
+
+    # ==========================================
+    # 🌟 2. 社員・管理者向け：小テストURL抜け検知アラート
+    # ==========================================
+    if user_role in ['admin', 'owner', 'head_teacher', 'am']:
         df_logs = safe_get_all_logs() 
         df_quizzes = safe_load_quiz_records() 
         today = datetime.date.today()
@@ -58,7 +145,7 @@ def render_home_page():
     st.divider()
     
     # ==========================================
-    # 🌟 掲示板エリア
+    # 🌟 3. 全講師向け：掲示板エリア
     # ==========================================
     st.subheader("📌 講師向け 連絡事項")
     
@@ -71,7 +158,7 @@ def render_home_page():
     
     st.info(current_message.replace('\n', '  \n'))
     
-    if user_role in ['admin', 'owner', 'head_teacher']:
+    if user_role in ['admin', 'owner', 'am']:
         with st.expander("✏️ 掲示板を編集"):
             new_msg = st.text_area("内容を入力", value=current_message, height=100)
             if st.button("💾 掲示板を更新"):
