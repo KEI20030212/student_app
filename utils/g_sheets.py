@@ -729,9 +729,6 @@ def add_new_textbook(new_name):
         # 🌟 5列構成（テキスト, 章, 単元名, 開始ページ, 終了ページ）に合わせて追加
         worksheet.append_row([new_name, "-", "-", "-", "-"])
         
-        # 🌟 ここが自動並べ替えの魔法！
-        # 1行目（ヘッダー）は残したまま、A列〜E列（5列目）までを1列目（テキスト名）の昇順でまとめてソートします
-        worksheet.sort((1, 'asc'), range='A2:E1000')
         return True
     except Exception as e:
         st.error(f"🚨 新規テキストの裏側でエラー発生: {e}")
