@@ -445,10 +445,10 @@ def render_multi_input_page():
                                                         else:
                                                             unit_options = []
                                                         
-                                                        adv_unit = st.selectbox("実施した単元を選択してください", [""] + unit_options, key=f"adv_unit_{b}_{i}_{t_idx}")
+                                                        adv_units = st.multiselect("実施した単元を選択してください (複数可)", unit_options, key=f"adv_unit_{b}_{i}_{t_idx}")
                                                         
-                                                        if adv_unit:
-                                                            advanced_p_list.append(f"{text_name}: {adv_unit}")
+                                                        if adv_units:
+                                                            advanced_p_list.append(f"{text_name}: {', '.join(adv_units)}")
                                                         else:
                                                             advanced_p_list.append(f"{text_name}: -")
                                                     else:
