@@ -15,7 +15,7 @@ from utils.g_sheets import (
 )
 from utils.pdf_generator import generate_payslip_pdf
 
-@st.cache_data(ttl=60, show_spinner="☁️ 授業データを一括取得中...（超高速🚀）")
+# 🌟 変更: utils側でキャッシュされているため、こちらの二重キャッシュを削除しました
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -116,9 +116,16 @@ def render_salary_dashboard_page():
                 final_salary = koma_salary + transport_total + allowance
 
                 summary_list.append({
-                    "👨‍🏫 担当講師": teacher, "合計コマ数": total_koma, "授業給 (円)": int(koma_salary),
-                    "役職手当 (円)": int(allowance), "出勤日数": working_days, 
-                    "交通費合計 (円)": int(transport_total), "💰 最終支給額 (円)": int(final_salary)
+                    "👨‍🏫 担当講師": teacher, 
+                    "合計コマ数": total_koma,
+                    "1:1コマ": koma_11, 
+                    "1:2コマ": koma_12, 
+                    "1:3コマ": koma_13, 
+                    "授業給 (円)": int(koma_salary),
+                    "役職手当 (円)": int(allowance), 
+                    "出勤日数": working_days, 
+                    "交通費合計 (円)": int(transport_total), 
+                    "💰 最終支給額 (円)": int(final_salary)
                 })
 
             if summary_list:
@@ -184,6 +191,5 @@ def render_salary_dashboard_page():
         st.markdown("##### 📋 講師設定一覧（確認用）")
         st.dataframe(df_instructors, hide_index=True, use_container_width=True)
         
-        # 🌟 変更：手動追加による名前ズレ事故を根本から防止するための親切なアナウンス欄に変更
         with st.expander("➕ 新しい講師を登録する（アカウント連動）"):
             st.info("💡 **一元管理へのアップデート**\n\n「名前の入力ミス」や「データの二重管理」を完璧に防ぐため、新しい講師の登録は左メニューの **「⚙️ アカウント・システム設定」** から行ってください。\n\nそちらでアカウントを作成すると、自動的にこの講師マスタにも連動して、初期給与設定の枠が自動生成されます！")
