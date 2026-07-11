@@ -15,10 +15,9 @@ from utils.g_sheets import (
 )
 from utils.pdf_generator import generate_payslip_pdf
 
-# 🌟 セグフォ対策1: g_sheets側でキャッシュされたデータを安全に受け取るため、完全に独立したコピー（deep=True）を作成
+@st.cache_data(ttl=60, show_spinner="☁️ 授業データを一括取得中...（超高速🚀）")
 def cached_get_all_logs():
-    df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
-    return df.copy(deep=True) if not df.empty else pd.DataFrame()
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
 @st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
@@ -30,8 +29,7 @@ def fetch_instructor_master_cached():
 def render_salary_dashboard_page():
     st.header("💰 給与・交通費ダッシュボード")
 
-    # 🌟 セグフォ対策2の要: ここで「深いコピー（deep=True）」を作ってから操作することで、メモリクラッシュを完全に防ぐ！
-    df_instructors = fetch_instructor_master_cached().copy(deep=True)
+    df_instructors = fetch_instructor_master_cached()
 
     # --------------------------------------------------------
     # 操作パネル（一括データ取得＆ゆらぎ吸収）
@@ -118,16 +116,9 @@ def render_salary_dashboard_page():
                 final_salary = koma_salary + transport_total + allowance
 
                 summary_list.append({
-                    "👨‍🏫 担当講師": teacher, 
-                    "合計コマ数": total_koma,
-                    "1:1コマ": koma_11, 
-                    "1:2コマ": koma_12, 
-                    "1:3コマ": koma_13, 
-                    "授業給 (円)": int(koma_salary),
-                    "役職手当 (円)": int(allowance), 
-                    "出勤日数": working_days, 
-                    "交通費合計 (円)": int(transport_total), 
-                    "💰 最終支給額 (円)": int(final_salary)
+                    "👨‍🏫 担当講師": teacher, "合計コマ数": total_koma, "授業給 (円)": int(koma_salary),
+                    "役職手当 (円)": int(allowance), "出勤日数": working_days, 
+                    "交通費合計 (円)": int(transport_total), "💰 最終支給額 (円)": int(final_salary)
                 })
 
             if summary_list:
@@ -176,8 +167,6 @@ def render_salary_dashboard_page():
                 
                 if st.form_submit_button("✅ この内容で保存する", type="primary"):
                     idx = df_instructors.index[df_instructors["講師名"] == target_teacher][0]
-                    
-                    # 🌟 このデータ書き換え処理がクラッシュの原因でした（今はdeepコピーを作ったので安全に動きます！）
                     df_instructors.at[idx, '1:1単価'] = new_11
                     df_instructors.at[idx, '1:2単価'] = new_12
                     df_instructors.at[idx, '1:3単価'] = new_13
@@ -195,5 +184,6 @@ def render_salary_dashboard_page():
         st.markdown("##### 📋 講師設定一覧（確認用）")
         st.dataframe(df_instructors, hide_index=True, use_container_width=True)
         
+        # 🌟 変更：手動追加による名前ズレ事故を根本から防止するための親切なアナウンス欄に変更
         with st.expander("➕ 新しい講師を登録する（アカウント連動）"):
             st.info("💡 **一元管理へのアップデート**\n\n「名前の入力ミス」や「データの二重管理」を完璧に防ぐため、新しい講師の登録は左メニューの **「⚙️ アカウント・システム設定」** から行ってください。\n\nそちらでアカウントを作成すると、自動的にこの講師マスタにも連動して、初期給与設定の枠が自動生成されます！")
