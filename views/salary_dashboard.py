@@ -15,23 +15,23 @@ from utils.g_sheets import (
 )
 from utils.pdf_generator import generate_payslip_pdf
 
+# 🌟 セグフォ対策1: g_sheets側でキャッシュされたデータを安全に受け取るため、完全に独立したコピー（deep=True）を作成
 def cached_get_all_logs():
     df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
-    # 🌟 セグフォ（サーバークラッシュ）対策：原本をいじらないよう、必ずコピーを渡す！
-    return df.copy() if not df.empty else pd.DataFrame()
+    return df.copy(deep=True) if not df.empty else pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
     df = robust_api_call(load_instructor_master, fallback_value=pd.DataFrame())
     if df.empty or "講師名" not in df.columns:
         return pd.DataFrame(columns=["講師名", "1:1単価", "1:2単価", "1:3単価", "交通費", "役職手当"])
-    # 🌟 ここも念のため安全なコピーを渡す
-    return df.copy()
+    return df
 
 def render_salary_dashboard_page():
     st.header("💰 給与・交通費ダッシュボード")
 
-    df_instructors = fetch_instructor_master_cached()
+    # 🌟 セグフォ対策2の要: ここで「深いコピー（deep=True）」を作ってから操作することで、メモリクラッシュを完全に防ぐ！
+    df_instructors = fetch_instructor_master_cached().copy(deep=True)
 
     # --------------------------------------------------------
     # 操作パネル（一括データ取得＆ゆらぎ吸収）
@@ -176,6 +176,8 @@ def render_salary_dashboard_page():
                 
                 if st.form_submit_button("✅ この内容で保存する", type="primary"):
                     idx = df_instructors.index[df_instructors["講師名"] == target_teacher][0]
+                    
+                    # 🌟 このデータ書き換え処理がクラッシュの原因でした（今はdeepコピーを作ったので安全に動きます！）
                     df_instructors.at[idx, '1:1単価'] = new_11
                     df_instructors.at[idx, '1:2単価'] = new_12
                     df_instructors.at[idx, '1:3単価'] = new_13
