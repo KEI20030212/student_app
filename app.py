@@ -19,7 +19,7 @@ from views.search_page import render_search_page#改良済
 from views.analytics_dashboard import render_analytics_dashboard_page#改良済
 from views.my_salary import render_my_salary_page#変更なし
 from views.account_manager import render_account_manager_page#変更なし
-from views.finance_integrated import render_finance_integrated_page#改良済
+#from views.finance_integrated import render_finance_integrated_page#改良済
 # ==========================================
 # 🛠️ 2. 裏方部隊（utils）のインポート
 # ==========================================
@@ -110,7 +110,7 @@ def main():
         menu_options.extend([
             "📈 講師分析ダッシュボード",
             "⚙️ アカウント・システム設定",
-            "💰 財務・請求ダッシュボード"
+            #"💰 財務・請求ダッシュボード"
         ])
     else:
         # 👨‍🏫 一般講師専用（自分に関することだけ）
@@ -139,7 +139,7 @@ def main():
     elif page == "🔍 全生徒の過去ログ検索": render_search_page()
     elif page == "📈 講師分析ダッシュボード": render_analytics_dashboard_page()
     elif page == "💴 自分の給与確認": render_my_salary_page()
-    elif page == "💰 財務・請求ダッシュボード": render_finance_integrated_page()
+    #elif page == "💰 財務・請求ダッシュボード": render_finance_integrated_page()
     elif page == "💌 メッセージ送信": render_message_sender_page()
     elif page == "⚙️ アカウント・システム設定": render_account_manager_page()
 
