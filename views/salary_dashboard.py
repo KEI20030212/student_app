@@ -15,18 +15,16 @@ from utils.g_sheets import (
 )
 from utils.pdf_generator import generate_payslip_pdf
 
+@st.cache_data(ttl=60, show_spinner="☁️ 授業データを一括取得中...（超高速🚀）")
 def cached_get_all_logs():
-    df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
-    # 🌟 セグフォ（サーバークラッシュ）対策：原本をいじらないよう、必ずコピーを渡す！
-    return df.copy() if not df.empty else pd.DataFrame()
+    return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
 @st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
     df = robust_api_call(load_instructor_master, fallback_value=pd.DataFrame())
     if df.empty or "講師名" not in df.columns:
         return pd.DataFrame(columns=["講師名", "1:1単価", "1:2単価", "1:3単価", "交通費", "役職手当"])
-    # 🌟 ここも念のため安全なコピーを渡す
-    return df.copy()
+    return df
 
 def render_salary_dashboard_page():
     st.header("💰 給与・交通費ダッシュボード")
@@ -117,6 +115,7 @@ def render_salary_dashboard_page():
                 transport_total = working_days * trans
                 final_salary = koma_salary + transport_total + allowance
 
+                # 🌟 変更：表の中に 1:1, 1:2, 1:3 それぞれのコマ数を独立して表示するように追加
                 summary_list.append({
                     "👨‍🏫 担当講師": teacher, 
                     "合計コマ数": total_koma,
@@ -193,5 +192,6 @@ def render_salary_dashboard_page():
         st.markdown("##### 📋 講師設定一覧（確認用）")
         st.dataframe(df_instructors, hide_index=True, use_container_width=True)
         
+        # 🌟 変更：手動追加による名前ズレ事故を根本から防止するための親切なアナウンス欄に変更
         with st.expander("➕ 新しい講師を登録する（アカウント連動）"):
             st.info("💡 **一元管理へのアップデート**\n\n「名前の入力ミス」や「データの二重管理」を完璧に防ぐため、新しい講師の登録は左メニューの **「⚙️ アカウント・システム設定」** から行ってください。\n\nそちらでアカウントを作成すると、自動的にこの講師マスタにも連動して、初期給与設定の枠が自動生成されます！")
