@@ -1,10 +1,10 @@
 streamlit==1.56.0
 gspread==6.2.1
 google-auth==2.49.2
-pandas==3.0.2
+pandas==2.2.3
+pyarrow==16.1.0
 altair
 oauth2client
 reportlab
 pypdf
 google-api-python-client
-google-auth
