@@ -115,10 +115,18 @@ def render_salary_dashboard_page():
                 transport_total = working_days * trans
                 final_salary = koma_salary + transport_total + allowance
 
+                # 🌟 変更：表の中に 1:1, 1:2, 1:3 それぞれのコマ数を独立して表示するように追加
                 summary_list.append({
-                    "👨‍🏫 担当講師": teacher, "合計コマ数": total_koma, "授業給 (円)": int(koma_salary),
-                    "役職手当 (円)": int(allowance), "出勤日数": working_days, 
-                    "交通費合計 (円)": int(transport_total), "💰 最終支給額 (円)": int(final_salary)
+                    "👨‍🏫 担当講師": teacher, 
+                    "合計コマ数": total_koma,
+                    "1:1コマ": koma_11, 
+                    "1:2コマ": koma_12, 
+                    "1:3コマ": koma_13, 
+                    "授業給 (円)": int(koma_salary),
+                    "役職手当 (円)": int(allowance), 
+                    "出勤日数": working_days, 
+                    "交通費合計 (円)": int(transport_total), 
+                    "💰 最終支給額 (円)": int(final_salary)
                 })
 
             if summary_list:
