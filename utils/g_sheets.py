@@ -1206,6 +1206,7 @@ def load_self_study_data():
         return pd.DataFrame()
 
 #quiz_dashboard.py
+@st.cache_data(ttl=600, show_spinner=False)
 def get_quiz_master_dict():
     """
     「設定_小テスト一覧」シートから、テスト名と満点・用紙サイズの対応表を取得する
