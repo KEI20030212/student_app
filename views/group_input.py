@@ -42,7 +42,6 @@ def cached_get_teacher_names():
 def cached_get_textbook_master():
     return robust_api_call(get_textbook_master, fallback_value={})
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_quiz_master():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 
@@ -50,7 +49,6 @@ def cached_get_quiz_master():
 def cached_get_type_advice():
     return robust_api_call(get_type_advice_dict, fallback_value={})
 
-# 🌟 修正: 二重キャッシュ防止のためデコレータを削除
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 

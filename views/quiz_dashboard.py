@@ -16,7 +16,6 @@ from utils.api_guard import robust_api_call
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600)  
 def cached_get_quiz_details():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 

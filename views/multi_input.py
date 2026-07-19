@@ -40,7 +40,6 @@ def cached_get_textbook_master():
     dct = robust_api_call(get_textbook_master, fallback_value={})
     return dict(dct)
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_quiz_master():
     dct = robust_api_call(get_quiz_master_dict, fallback_value={})
     return dict(dct)

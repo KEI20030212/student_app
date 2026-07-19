@@ -85,7 +85,6 @@ def cached_get_student_master_for_report():
     from utils.g_sheets import get_student_master
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_quiz_details_for_report():
     from utils.g_sheets import get_quiz_master_dict
     return robust_api_call(get_quiz_master_dict, fallback_value={})
