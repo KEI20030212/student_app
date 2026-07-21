@@ -315,7 +315,7 @@ def render_multi_input_page():
                                                         last_teacher = str(last_row.get('担当講師', '不明'))
                                                         last_date_str = last_row['日時'].strftime('%Y/%m/%d') if pd.notna(last_row['日時']) else "不明"
                                                         
-                                                        last_note = str(last_row.get('次回への引継ぎ事項', ''))
+                                                        last_note = str(last_row.get('次回への引継ぎ', ''))
                                                         if last_note in ["nan", "", "-"]: last_note = "特になし"
                                                         
                                                         last_hw_text = str(last_row.get('次回の宿題テキスト', ''))
