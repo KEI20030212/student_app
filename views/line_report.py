@@ -263,7 +263,7 @@ def render_line_report_page():
                     student_id = selected_student.split(" - ")[0]
                     student_name = selected_student.split(" - ")[1]
                     
-                    with st.form(key=f"parent_reply_form"):
+                    with st.form(key=f"parent_reply_form", clear_on_submit=True):
                         st.markdown(f"### 💬 {student_name} さんの保護者リアクション登録")
                         
                         c1, c2 = st.columns(2)
@@ -307,8 +307,6 @@ def render_line_report_page():
                                         fallback_value=False
                                     )
                                     if success:
-                                        st.success(f"✅ {student_name} さんの保護者返信を正常に記録しました！")
-                                        time.sleep(1.5)
-                                        st.rerun()
+                                        st.toast(f"{student_name} さんの返信を記録しました！", icon="✅")
                                     else:
                                         st.error("❌ スプレッドシートへの保存に失敗しました。")
