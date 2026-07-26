@@ -49,7 +49,6 @@ def render_home_page():
                 load_transfer_requests.clear()
                 st.rerun()
 
-        # 🌟 共通化：アラート表示用の専用関数（コードが長くなるのを防ぐためのスマートな仕組み）
         def render_transfer_alerts(df_transfers, branch_name, sheet_id):
             if not df_transfers.empty:
                 df_transfers.columns = df_transfers.columns.str.strip().str.replace('\n', '')
@@ -58,13 +57,17 @@ def render_home_page():
                 if 'タイムスタンプ' in df_transfers.columns:
                     df_transfers['タイムスタンプ_dt'] = pd.to_datetime(df_transfers['タイムスタンプ'], format='mixed', errors='coerce')
                     
-                    seven_days_ago = pd.Timestamp.now() - pd.Timedelta(days=7)
-                    recent_transfers = df_transfers[df_transfers['タイムスタンプ_dt'] >= seven_days_ago].sort_values('タイムスタンプ_dt', ascending=False)
+                    # データを新しい順に並べ替え
+                    df_transfers = df_transfers.sort_values('タイムスタンプ_dt', ascending=False)
                     
-                    if not recent_transfers.empty:
-                        st.warning(f"🔔 【{branch_name}】直近7日以内に **{len(recent_transfers)}件** の申請が届いています！")
-                        
-                        for _, row in recent_transfers.iterrows():
+                    # 7日前を境界線にして、データを「直近」と「過去」に真っ二つに分ける
+                    seven_days_ago = pd.Timestamp.now() - pd.Timedelta(days=7)
+                    recent_transfers = df_transfers[df_transfers['タイムスタンプ_dt'] >= seven_days_ago]
+                    past_transfers = df_transfers[df_transfers['タイムスタンプ_dt'] < seven_days_ago]
+                    
+                    # 👉 共通処理：1件ずつカード形式で表示する関数を中に作る
+                    def draw_transfer_cards(df_target):
+                        for _, row in df_target.iterrows():
                             dt_val = row['タイムスタンプ_dt']
                             ts = dt_val.strftime('%m/%d %H:%M') if pd.notna(dt_val) else "不明"
                             
@@ -92,10 +95,19 @@ def render_home_page():
                                     
                                 st.markdown(f"**■ 希望時間:** {row.get('お振替希望授業時間', '')}")
                                 st.markdown(f"**■ 備考:** {row.get('備考欄', '')}")
-                                # 🌟 リンク先も指定された校舎のIDに自動で変わるように設定
                                 st.markdown(f"[🔗 スプレッドシートで全回答を確認する](https://docs.google.com/spreadsheets/d/{sheet_id}/edit)")
+
+                    # 🌟 1. 直近7日間のデータを常時表示
+                    if not recent_transfers.empty:
+                        st.warning(f"🔔 【{branch_name}】直近7日以内に **{len(recent_transfers)}件** の申請が届いています！")
+                        draw_transfer_cards(recent_transfers)
                     else:
                         st.info(f"💡 【{branch_name}】直近7日以内の新しい振替申請はありません。")
+
+                    # 🌟 2. 過去のデータをアコーディオンに格納して表示
+                    if not past_transfers.empty:
+                        with st.expander(f"📂 【{branch_name}】過去の振替申請履歴（全 {len(past_transfers)}件）"):
+                            draw_transfer_cards(past_transfers)
             else:
                 st.info(f"💡 【{branch_name}】まだデータがありません。（またはシートが見つかりません）")
 
