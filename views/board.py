@@ -141,6 +141,10 @@ def render_home_page():
                 
                 missing_url_students = []
                 for student in today_students:
+                    # 👇 変更：その生徒の今日の授業ログを絞り込み、Myeトレを使ったか確認
+                    student_classes_today = today_logs[today_logs[name_col] == student]
+                    used_myetore = any("Myeトレ" in str(row.get("テキスト", "")) for _, row in student_classes_today.iterrows())
+
                     has_quiz = False
                     if not df_quizzes.empty and "APIエラー発生" not in df_quizzes.columns:
                         df_quizzes['日時'] = pd.to_datetime(df_quizzes['日時'], format='mixed', errors='coerce')
@@ -148,7 +152,8 @@ def render_home_page():
                         if not student_quizzes.empty:
                             has_quiz = True
                             
-                    if not has_quiz:
+                    # 👇 変更：小テストがなく、かつMyeトレもやっていない生徒だけをエラーにする
+                    if not has_quiz and not used_myetore:
                         missing_url_students.append(student)
                         
                 if missing_url_students:
