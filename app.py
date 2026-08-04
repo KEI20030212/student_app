@@ -26,6 +26,7 @@ from views.finance_integrated import render_finance_integrated_page#改良済
 from utils.calc_logic import calculate_hw_rate, calculate_quiz_points, calculate_motivation_rank
 from utils.g_sheets import get_textbook_master, add_new_textbook, get_last_homework_info
 from utils.g_sheets import get_all_accounts
+from utils.api_guard import robust_api_call
 
 
 # ページの基本設定
@@ -57,7 +58,7 @@ def login_screen():
                     st.session_state.update({'logged_in': True, 'role': 'teacher', 'username': '先生', 'user_id': 'teacher'})
                     st.rerun()
                 else:
-                    accounts = get_all_accounts()
+                    accounts = robust_api_call(get_all_accounts, fallback_value={})
 
                     # IDが存在し、かつパスワード（数字のみの場合に備えてstr変換）が一致するかチェック
                     if username in accounts and str(accounts[username].get('パスワード')) == str(password):
