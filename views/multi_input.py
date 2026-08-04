@@ -40,6 +40,7 @@ def cached_get_textbook_master():
     dct = robust_api_call(get_textbook_master, fallback_value={})
     return dict(dct)
 
+@st.cache_data(ttl=600, show_spinner=False)
 def cached_get_quiz_master():
     dct = robust_api_call(get_quiz_master_dict, fallback_value={})
     return dict(dct)
@@ -53,7 +54,6 @@ def cached_get_all_logs():
     df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
     return df.copy() if not df.empty else df
 
-# 🌟 下書きキーのプレフィックス
 DRAFT_PREFIXES = (
     "num_blocks", "class_date", "class_type", 
     "sb_", "sel_student", "new_name", "att", "late", "sub", "texts", "new_usage_text", 
@@ -63,6 +63,12 @@ DRAFT_PREFIXES = (
     "n_start", "n_end", "hw_unit", "advc", "p_msg", "next_h", "d_s", "d_e", "n_s", "n_e", "hw_ranges_num",
     "hw_reason", "hw_fix", "bring"
 )
+REACTION_HINTS = {
+    "原因を分析した": "💡 【ヒント】「なぜ間違えたか」を自分で気づけた姿勢を具体的に褒めると効果的です。",
+    "悔しがった": "💡 【ヒント】その向上心を肯定し、次回の目標（リベンジ）にどう繋げたかを書くのがおすすめです。",
+    "放置しようとした": "💡 【ヒント】「バツ直しの重要性」をどう伝えて、どう行動を修正させたかを記録しておきましょう。",
+    "すぐに答えを見たがった": "💡 【ヒント】すぐに教えず、「どこまで自力で解けたか」を確認し、考えさせるプロセスをどう踏ませたか書きましょう。"
+}
 
 def add_tab():
     st.session_state['num_blocks'] = st.session_state.get('num_blocks', 1) + 1
@@ -518,7 +524,7 @@ def render_multi_input_page():
                                             with col_eval1:
                                                 concentration = st.selectbox("集中力", ["超集中", "前向き", "疲労気味", "ムラあり", "集中できない"], index=None, placeholder="選択してください", key=f"conc_{b}_{i}")
                                             with col_eval2:
-                                                reaction = st.selectbox("ミスへの反応", ["原因を分析した", "悔しがった", "放置しようとした"], index=None, placeholder="選択してください", key=f"reac_{b}_{i}")
+                                                reaction = st.selectbox("ミスへの反応", ["原因を分析した", "悔しがった", "放置しようとした", "すぐに答えを見たがった"], index=None, placeholder="選択してください", key=f"reac_{b}_{i}")
                                             
                                             st.divider()
 
@@ -583,11 +589,17 @@ def render_multi_input_page():
                                             st.divider()
                                             if is_trial:
                                                 st.write("💬 **体験授業コメント**")
+                                                if reaction in REACTION_HINTS:
+                                                    st.markdown(f"<div style='font-size: 0.9em; color: #555; background-color: #F0F8FF; padding: 8px; border-radius: 5px; margin-bottom: 5px;'>{REACTION_HINTS[reaction]}</div>", unsafe_allow_html=True)
+                                                
                                                 advice = st.text_area("🌟 生徒の長所・褒めた点", height=80, key=f"advc_{b}_{i}")
                                                 parent_msg = st.text_area("👪 保護者へお伝えしたいこと", height=80, key=f"p_msg_{b}_{i}")
                                                 next_handover = st.text_area("🔄 入塾に向けた課題・特記事項", height=80, key=f"next_h_{b}_{i}")
                                             else:
                                                 st.write("💬 **コメント事項**")
+                                                if reaction in REACTION_HINTS:
+                                                    st.markdown(f"<div style='font-size: 0.9em; color: #555; background-color: #F0F8FF; padding: 8px; border-radius: 5px; margin-bottom: 5px;'>{REACTION_HINTS[reaction]}</div>", unsafe_allow_html=True)
+                                                
                                                 advice = st.text_area("🗣️ 授業でのアドバイス（褒めた点など）", height=80, key=f"advc_{b}_{i}")
                                                 parent_msg = st.text_area("👪 保護者への連絡事項", height=80, key=f"p_msg_{b}_{i}")
                                                 next_handover = st.text_area("🔄 次回への引継ぎ事項", height=80, key=f"next_h_{b}_{i}")
