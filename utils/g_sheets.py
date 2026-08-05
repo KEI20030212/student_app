@@ -869,6 +869,7 @@ def _update_student_master_row(student_name, hw_rate, motivation_rank):
     except Exception as e:
         print(f"生徒マスター更新エラー: {e}")
 
+@st.cache_data(ttl=600, show_spinner=False)
 def get_type_advice_dict():
     """
     「設定_生徒タイプ」シートから、タイプ名とアドバイス内容を取得する
