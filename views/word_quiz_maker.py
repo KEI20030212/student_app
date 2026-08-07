@@ -36,7 +36,7 @@ def render_word_quiz_maker_page():
 
     # --- メイン設定 ---
     # 🌟 修正1：選択肢を「キクタン」の4つに限定
-    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問", "キクタン8問(東)", "キクタン16問(東)", "キクタン32問(東)", "キクタン50問(東)", "WordCup20問", "WordCup100問", "WordCup200問"]
+    target_options = ["キクタン8問", "キクタン16問", "キクタン32問", "キクタン50問", "キクタン8問(東)", "キクタン16問(東)", "キクタン32問(東)", "キクタン50問(東)", "WordCup20問", "WordCup100問", "WordCup200問", "iワーク中3英単語(東書)"]
     
     # 登録されている中から、対象の4つだけを表示（登録がない場合は警告）
     available_options = [opt for opt in target_options if opt in quiz_dict]
