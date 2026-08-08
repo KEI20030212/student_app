@@ -16,6 +16,7 @@ from utils.api_guard import robust_api_call
 from views.student_details import render_student_details_page
 from views.analysis import render_analysis_page
 from views.conference_report import render_conference_report
+from views.admin_tools import render_admin_tools_page # 🌟 追加：一括進級ツールを読み込む
 
 def render_student_portal_page():
     col_title, col_toggle = st.columns([3, 1])
@@ -49,17 +50,22 @@ def render_student_portal_page():
         st.sidebar.info("✏️ 通常モード（入力・編集）")
 
     # ==========================================
-    # 生徒が選ばれていない時の「機能紹介 ＆ 新入生登録画面」
+    # 生徒が選ばれていない時の「機能紹介 ＆ 新入生登録・管理ツール画面」
     # ==========================================
     if selected_student is None:
         
-        # 新入生登録フォーム（教室長・管理者のみ表示）
+        # 教室長・管理者のみ表示される本部エリア
         if st.session_state.get('role') in ['admin', 'owner', 'head_teacher'] and not is_conference_mode:
             
             if 'flash_success_msg' in st.session_state:
                 st.success(st.session_state['flash_success_msg'])
                 del st.session_state['flash_success_msg'] 
             
+            # 🌟 ここに追加！「管理ツール（一括進級）」を一番上に表示
+            st.divider()
+            render_admin_tools_page()
+            st.divider()
+
             form_placeholder = st.empty()
             
             with form_placeholder.container():
@@ -68,8 +74,7 @@ def render_student_portal_page():
                         st.markdown("##### 📝 基本情報の入力")
                         
                         branch_opts = {
-                            "田端新町校": "t",
-                            "東十条駅前校": "h",
+                            "池上校": "i",
                             "プレフィックスなし (数字のみ)": ""
                         }
                         selected_branch_key = st.selectbox("🏫 所属校舎（生徒IDの頭文字になります）", list(branch_opts.keys()), index=0)
@@ -205,7 +210,7 @@ def render_student_portal_page():
             render_analysis_page(selected_student)
             
         # ==========================================
-        # 🌟 新規追加：退塾手続きエリア（管理者限定 ＆ 非面談モード時）
+        # 🌟 退塾手続きエリア（管理者限定 ＆ 非面談モード時）
         # ==========================================
         if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
             st.write("")
@@ -219,7 +224,7 @@ def render_student_portal_page():
                 st.warning(f"この操作を行うと、{target_name} さんのデータは「退塾生情報」シートに移動し、現役生リスト（授業入力や月謝計算など）から即座に除外されます。")
                 
                 # 誤爆防止用の同意チェックボックス
-                confirm_archive = st.checkbox(f"本当に {target_name} 先生の生徒データをアーカイブ（退塾処理）してよろしいですか？", key="chk_archive")
+                confirm_archive = st.checkbox(f"本当に {target_name} さんの生徒データをアーカイブ（退塾処理）してよろしいですか？", key="chk_archive")
                 
                 if st.button(f"🚀 {target_name} さんの退塾処理を実行する", type="primary", use_container_width=True):
                     if not confirm_archive:
