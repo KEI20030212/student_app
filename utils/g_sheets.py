@@ -397,26 +397,30 @@ def get_student_quiz_records(student_name):
 
 def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc, 
                     dev_eng=None, dev_math=None, dev_jpn=None, dev_sci=None, dev_soc=None, 
-                    dev_3=None, dev_5=None, 
+                    dev_3=None, dev_5=None, # UIからはNoneが来ますが互換性のため残します
                     pe=None, tech=None, home=None, mus=None, art=None, is_naishin=False,
-                    att_eng=None, att_math=None, att_jpn=None, att_sci=None, att_soc=None, # 🌟 態度を追加
+                    att_eng=None, att_math=None, att_jpn=None, att_sci=None, att_soc=None,
                     att_pe=None, att_gika=None, att_art=None, att_mus=None):
+    
     gc = get_gc_client()
     sh = gc.open_by_key(SPREADSHEET_ID)
     ws = sh.worksheet("成績_定期テスト")
     
     header = ws.row_values(1)
     
-    # 🌟 「態度」用のカラムを required_cols に追加
+    # 🌟 改善1：重複していた「偏差値_英語」などを削除し、スプレッドシートを綺麗に！
     required_cols = [
-        '偏差値_英語', '偏差値_数学', '偏差値_国語', '偏差値_理科', '偏差値_社会', 
+        '日時', '生徒名', 'テスト種別',
+        '英語', '数学', '国語', '理科', '社会', '総合',
         '英語 偏差値', '数学 偏差値', '国語 偏差値', '理科 偏差値', '社会 偏差値', 
-        '偏差値_3科', '偏差値_5科', '保体', '技術', '家庭', '美術', '音楽', '9科総合', 
+        '偏差値_3科', '偏差値_5科', 
+        '保体', '技術', '家庭', '美術', '音楽', '9科総合', 
         '英語 内申', '数学 内申', '国語 内申', '理科 内申', '社会 内申',
         '保体 内申', '技家 内申', '美術 内申', '音楽 内申',
-        '英語 態度', '数学 態度', '国語 態度', '理科 態度', '社会 態度', # 🌟 追加
-        '保体 態度', '技家 態度', '美術 態度', '音楽 態度' # 🌟 追加
+        '英語 態度', '数学 態度', '国語 態度', '理科 態度', '社会 態度',
+        '保体 態度', '技家 態度', '美術 態度', '音楽 態度'
     ]
+    
     missing_cols = [col for col in required_cols if col not in header]
     
     if missing_cols:
@@ -442,30 +446,35 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
             '技家 内申': tech if tech is not None else "-", 
             '美術 内申': art if art is not None else "-",  
             '音楽 内申': mus if mus is not None else "-",
-            '英語 態度': att_eng if att_eng else "-",   # 🌟 追加
-            '数学 態度': att_math if att_math else "-", # 🌟 追加
-            '国語 態度': att_jpn if att_jpn else "-",   # 🌟 追加
-            '理科 態度': att_sci if att_sci else "-",   # 🌟 追加
-            '社会 態度': att_soc if att_soc else "-",   # 🌟 追加
-            '保体 態度': att_pe if att_pe else "-",     # 🌟 追加
-            '技家 態度': att_gika if att_gika else "-", # 🌟 追加
-            '美術 態度': att_art if att_art else "-",   # 🌟 追加
-            '音楽 態度': att_mus if att_mus else "-"    # 🌟 追加
+            '英語 態度': att_eng if att_eng else "-", 
+            '数学 態度': att_math if att_math else "-", 
+            '国語 態度': att_jpn if att_jpn else "-", 
+            '理科 態度': att_sci if att_sci else "-", 
+            '社会 態度': att_soc if att_soc else "-", 
+            '保体 態度': att_pe if att_pe else "-", 
+            '技家 態度': att_gika if att_gika else "-", 
+            '美術 態度': att_art if att_art else "-", 
+            '音楽 態度': att_mus if att_mus else "-" 
         })
     else:
-        total_5 = sum([x for x in [eng, math_score, jpn, sci, soc] if x is not None])
-        total_9 = total_5 + sum([x for x in [pe, tech, home, mus, art] if x is not None]) if test_type == "期末テスト" else "-"
+        # 🌟 改善3：合計点が誤って「0」になるのを防ぎ、未入力時は「-」にする
+        scores_5 = [x for x in [eng, math_score, jpn, sci, soc] if x is not None]
+        total_5 = sum(scores_5) if scores_5 else "-"
+        
+        scores_4 = [x for x in [pe, tech, home, mus, art] if x is not None]
+        total_9 = (sum(scores_5) + sum(scores_4)) if (scores_5 and scores_4 and test_type == "期末テスト") else "-"
+
+        # 🌟 改善2：偏差値の自動平均計算を追加！（これでグラフが表示されます）
+        devs_5 = [x for x in [dev_eng, dev_math, dev_jpn, dev_sci, dev_soc] if x is not None]
+        dev_5_avg = round(sum(devs_5) / len(devs_5), 1) if devs_5 else "-"
+        
+        devs_3 = [x for x in [dev_eng, dev_math, dev_jpn] if x is not None]
+        dev_3_avg = round(sum(devs_3) / len(devs_3), 1) if devs_3 else "-"
 
         row_dict.update({
             '英語': eng if eng is not None else "-", '数学': math_score if math_score is not None else "-",
             '国語': jpn if jpn is not None else "-", '理科': sci if sci is not None else "-",
             '社会': soc if soc is not None else "-", '総合': total_5, 
-            
-            '偏差値_英語': dev_eng if dev_eng is not None else "-",
-            '偏差値_数学': dev_math if dev_math is not None else "-",
-            '偏差値_国語': dev_jpn if dev_jpn is not None else "-",
-            '偏差値_理科': dev_sci if dev_sci is not None else "-",
-            '偏差値_社会': dev_soc if dev_soc is not None else "-",
             
             '英語 偏差値': dev_eng if dev_eng is not None else "-",
             '数学 偏差値': dev_math if dev_math is not None else "-",
@@ -473,8 +482,9 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
             '理科 偏差値': dev_sci if dev_sci is not None else "-",
             '社会 偏差値': dev_soc if dev_soc is not None else "-",
             
-            '偏差値_3科': dev_3 if dev_3 is not None else "-",
-            '偏差値_5科': dev_5 if dev_5 is not None else "-",
+            '偏差値_3科': dev_3_avg, # 🌟 自動計算した平均値を格納！
+            '偏差値_5科': dev_5_avg, # 🌟 自動計算した平均値を格納！
+            
             '保体': pe if pe is not None else "-", '技術': tech if tech is not None else "-",
             '家庭': home if home is not None else "-", '音楽': mus if mus is not None else "-",
             '美術': art if art is not None else "-", 
@@ -483,7 +493,6 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
     
     row_to_append = [row_dict.get(col, "-") for col in header]
     ws.append_row(row_to_append)
-    st.cache_data.clear()
 
 #conference_report.py
 def load_quiz_data_from_dedicated_sheet(student_name):
