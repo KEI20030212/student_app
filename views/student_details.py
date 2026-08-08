@@ -24,6 +24,7 @@ from utils.api_guard import robust_api_call
 # 🌟 分離した2つのファイルをインポート！
 from views.test_score_input import render_test_score_input
 from views.test_score_view import render_test_score_view
+from views.test_score_edit import render_test_score_edit
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_get_type_advice():
@@ -37,7 +38,7 @@ def render_student_details_page(selected_student_option):
         student_id = "未設定"
         selected_student = selected_student_option
         
-    tab_info, tab_input, tab_view = st.tabs(["👤 基本情報・カルテ", "✍️ テスト成績を入力", "📈 テスト成績推移を見る"])
+    tab_info, tab_input, tab_edit, tab_view = st.tabs(["👤 基本情報・カルテ", "✍️ テスト成績を入力", "🛠️ 成績データを修正", "📈 テスト成績推移を見る"])
 
     with tab_info:
         df_students = robust_api_call(get_student_master, fallback_value=pd.DataFrame())
@@ -234,6 +235,9 @@ def render_student_details_page(selected_student_option):
 
     with tab_input:
         render_test_score_input(selected_student)
+        
+    with tab_edit:
+        render_test_score_edit(selected_student, df_student_tests)
 
     with tab_view:
         render_test_score_view(df_student_tests)
