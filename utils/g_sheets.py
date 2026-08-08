@@ -395,6 +395,7 @@ def get_student_quiz_records(student_name):
         print(f"小テスト記録の読み込みエラー: {e}")
         return [] # エラー時は空のリストを返す
 
+#student_details.py
 def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc, 
                     dev_eng=None, dev_math=None, dev_jpn=None, dev_sci=None, dev_soc=None, 
                     dev_3=None, dev_5=None, # UIからはNoneが来ますが互換性のため残します
@@ -493,6 +494,62 @@ def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc,
     
     row_to_append = [row_dict.get(col, "-") for col in header]
     ws.append_row(row_to_append)
+
+def update_test_score_data(row_idx, date, name, test_type, eng, math_score, jpn, sci, soc, 
+                    dev_eng=None, dev_math=None, dev_jpn=None, dev_sci=None, dev_soc=None, 
+                    pe=None, tech=None, home=None, mus=None, art=None, is_naishin=False,
+                    att_eng=None, att_math=None, att_jpn=None, att_sci=None, att_soc=None,
+                    att_pe=None, att_gika=None, att_art=None, att_mus=None):
+    """既存の成績データを上書き修正する関数"""
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("成績_定期テスト")
+    
+    header = ws.row_values(1)
+    
+    row_dict = {
+        '日時': date.strftime("%Y/%m/%d"), '生徒名': name, 'テスト種別': test_type,
+    }
+
+    if is_naishin:
+        row_dict.update({
+            '英語 内申': eng if eng is not None else "-", '数学 内申': math_score if math_score is not None else "-",
+            '国語 内申': jpn if jpn is not None else "-", '理科 内申': sci if sci is not None else "-",
+            '社会 内申': soc if soc is not None else "-", '保体 内申': pe if pe is not None else "-",
+            '技家 内申': tech if tech is not None else "-", '美術 内申': art if art is not None else "-",  
+            '音楽 内申': mus if mus is not None else "-",
+            '英語 態度': att_eng if att_eng else "-", '数学 態度': att_math if att_math else "-", 
+            '国語 態度': att_jpn if att_jpn else "-", '理科 態度': att_sci if att_sci else "-", 
+            '社会 態度': att_soc if att_soc else "-", '保体 態度': att_pe if att_pe else "-", 
+            '技家 態度': att_gika if att_gika else "-", '美術 態度': att_art if att_art else "-", 
+            '音楽 態度': att_mus if att_mus else "-" 
+        })
+    else:
+        scores_5 = [x for x in [eng, math_score, jpn, sci, soc] if x is not None]
+        total_5 = sum(scores_5) if scores_5 else "-"
+        scores_4 = [x for x in [pe, tech, home, mus, art] if x is not None]
+        total_9 = (sum(scores_5) + sum(scores_4)) if (scores_5 and scores_4 and test_type == "期末テスト") else "-"
+
+        devs_5 = [x for x in [dev_eng, dev_math, dev_jpn, dev_sci, dev_soc] if x is not None]
+        dev_5_avg = round(sum(devs_5) / len(devs_5), 1) if devs_5 else "-"
+        devs_3 = [x for x in [dev_eng, dev_math, dev_jpn] if x is not None]
+        dev_3_avg = round(sum(devs_3) / len(devs_3), 1) if devs_3 else "-"
+
+        row_dict.update({
+            '英語': eng if eng is not None else "-", '数学': math_score if math_score is not None else "-",
+            '国語': jpn if jpn is not None else "-", '理科': sci if sci is not None else "-",
+            '社会': soc if soc is not None else "-", '総合': total_5, 
+            '英語 偏差値': dev_eng if dev_eng is not None else "-", '数学 偏差値': dev_math if dev_math is not None else "-",
+            '国語 偏差値': dev_jpn if dev_jpn is not None else "-", '理科 偏差値': dev_sci if dev_sci is not None else "-",
+            '社会 偏差値': dev_soc if dev_soc is not None else "-",
+            '偏差値_3科': dev_3_avg, '偏差値_5科': dev_5_avg,
+            '保体': pe if pe is not None else "-", '技術': tech if tech is not None else "-",
+            '家庭': home if home is not None else "-", '音楽': mus if mus is not None else "-",
+            '美術': art if art is not None else "-", '9科総合': total_9
+        })
+    
+    row_to_update = [row_dict.get(col, "-") for col in header]
+    ws.update(values=[row_to_update], range_name=f"A{row_idx}")
 
 #conference_report.py
 def load_quiz_data_from_dedicated_sheet(student_name):
