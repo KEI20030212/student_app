@@ -396,6 +396,47 @@ def get_student_quiz_records(student_name):
         return [] # エラー時は空のリストを返す
 
 #student_details.py
+def batch_promote_students():
+    """年に1回の魔法！全生徒の学年を1つ上げる関数"""
+    gc = get_gc_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet("設定_生徒情報") # ※生徒情報が保存されているシート名を指定
+    
+    data = ws.get_all_values()
+    if not data or len(data) < 2:
+        return False, "データがありません"
+        
+    header = data[0]
+    if "学年" not in header:
+        return False, "「学年」列が見つかりません"
+        
+    grade_idx = header.index("学年")
+    
+    # 🌟 進級の変換ルール（辞書）
+    promotion_map = {
+        "小1": "小2", "小2": "小3", "小3": "小4", "小4": "小5", "小5": "小6", "小6": "中1",
+        "中1": "中2", "中2": "中3", "中3": "高1",
+        "高1": "高2", "高2": "高3", "高3": "卒業"
+    }
+    
+    promoted_count = 0
+    
+    # ヘッダー（0行目）を飛ばして1行目から処理
+    for row in data[1:]:
+        if len(row) > grade_idx:
+            current_grade = str(row[grade_idx]).strip()
+            # ルールに合致する学年があれば書き換える
+            if current_grade in promotion_map:
+                row[grade_idx] = promotion_map[current_grade]
+                promoted_count += 1
+                
+    if promoted_count > 0:
+        # スプレッドシートを丸ごと上書きして一瞬で更新
+        ws.update(values=data, range_name="A1")
+        return True, f"{promoted_count}名の生徒を進級させました！"
+    else:
+        return True, "進級対象の生徒がいませんでした。"
+
 def save_test_score(date, name, test_type, eng, math_score, jpn, sci, soc, 
                     dev_eng=None, dev_math=None, dev_jpn=None, dev_sci=None, dev_soc=None, 
                     dev_3=None, dev_5=None, # UIからはNoneが来ますが互換性のため残します
