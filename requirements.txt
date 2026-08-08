@@ -7,4 +7,5 @@ altair
 oauth2client
 reportlab
 pypdf
+plotly
 google-api-python-client
