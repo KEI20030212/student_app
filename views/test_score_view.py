@@ -169,6 +169,9 @@ def render_test_score_view(df_student_tests):
     drop_cols = [c for c in df_view.columns if c.endswith("_num")]
     df_display = df_view.drop(columns=drop_cols).sort_values("日時", ascending=False)
 
+    # 🌟 追加：数字と「-（ハイフン）」が混ざってエラーになるのを防ぐため、すべて文字列に統一！
+    df_display = df_display.fillna("").astype(str)
+
     def color_score(val):
         """点数や態度に応じて背景色をつける魔法の関数"""
         # 数値（点数）の判定
