@@ -411,7 +411,7 @@ def render_multi_input_page():
                                                     
                                                     with r_col2:
                                                         fix_sel = st.selectbox("本日の修正策", ["", "文量調整(減らす)", "期限延長(スライド)", "内容変更(基礎へ戻る)", "再約束(マインドセット)", "その他"], key=f"hw_fix_sel_{b}_{i}")
-                                                        if fix_sel == "other":
+                                                        if fix_sel == "その他":
                                                             fix_other = st.text_input("修正策（その他）", key=f"hw_fix_other_{b}_{i}")
                                                             hw_fix_val = f"その他: {fix_other}" if fix_other else "その他"
                                                         else:
