@@ -16,6 +16,7 @@ from utils.api_guard import robust_api_call
 def cached_get_student_master():
     return robust_api_call(get_student_master, fallback_value=pd.DataFrame())
 
+@st.cache_data(ttl=600)  
 def cached_get_quiz_details():
     return robust_api_call(get_quiz_master_dict, fallback_value={})
 
@@ -51,7 +52,7 @@ def render_quiz_list_page():
             if q_name not in quiz_names:
                 quiz_names.append(q_name)
 
-    # 🌟 共通化：表を綺麗に装飾する関数（生徒別でも小テスト別でも同じデザインを使えるように！）
+    # 🌟 共通化：表を綺麗に装飾する関数
     def sort_key(c):
         nums = re.findall(r'\d+', str(c))
         return int(nums[0]) if nums else 999
@@ -79,6 +80,7 @@ def render_quiz_list_page():
                 full_m = int(pd.Series(matched_marks).mode()[0])
                     
             try:
+                # 🌟 数字（点数）ならアイコンを付ける。日付（例: 08/10）ならそのまま返す
                 v = float(val)
                 ratio = v / full_m if full_m > 0 else 0
                 if ratio >= 1.0: return f"👑 {int(v)}"
@@ -192,32 +194,37 @@ def render_quiz_list_page():
                         last_date = df_quiz_s['日時'].max().strftime("%Y年%m月%d日")
                         st.success(f"📅 前回実施日: **{last_date}**")
 
-                        best_scores = df_quiz_s.groupby(['テキスト', '単元'])['点数'].max().reset_index()
-                        best_scores = best_scores.rename(columns={'テキスト': '小テスト名', '点数': '最高点数'})
+                        attempt_counts = df_quiz_s.groupby(['テキスト', '単元']).size().reset_index(name='挑戦回数')
+                        df_quiz_s_sorted = df_quiz_s.sort_values(by=['テキスト', '単元', '日時'], ascending=[True, True, False])
+                        latest_records = df_quiz_s_sorted.drop_duplicates(subset=['テキスト', '単元'], keep='first').copy()
+                        latest_records = pd.merge(latest_records, attempt_counts, on=['テキスト', '単元'], how='left')
+                        latest_records['実施日'] = latest_records['日時'].dt.strftime('%y/%m/%d')
+                        latest_records['挑戦回数'] = latest_records['挑戦回数'].astype(str) + "回"
+                        
+                        latest_records = latest_records.rename(columns={'テキスト': '小テスト名', '点数': '最新点数'})
 
-                        quiz_list = best_scores['小テスト名'].unique().tolist()
+                        quiz_list = latest_records['小テスト名'].unique().tolist()
                         
                         if quiz_list:
                             s_tabs = st.tabs(quiz_list)
                             for i, q_name in enumerate(quiz_list):
                                 with s_tabs[i]: 
-                                    df_display = best_scores[best_scores['小テスト名'] == q_name]
+                                    df_display = latest_records[latest_records['小テスト名'] == q_name]
                                     
-                                    pivot_df = df_display.pivot_table(
-                                        index='小テスト名', 
-                                        columns='単元', 
-                                        values='最高点数', 
-                                        aggfunc='max'
-                                    )
+                                    # 🌟 行に「最新点数」「挑戦回数」「実施日」、列に「単元」が来るように変換（転置: T）
+                                    pivot_df = df_display[['単元', '最新点数', '挑戦回数', '実施日']].set_index('単元').T
                                     
                                     if not pivot_df.empty:
+                                        # 単元番号順に並べ替え
                                         pivot_df = pivot_df[sorted(pivot_df.columns.tolist(), key=sort_key)]
-                                        # 🌟 新設した共通スタイリング関数を適用
+                                        pivot_df.index.name = None # 左上の項目名を消してスッキリさせる
+                                        
+                                        # 🌟 共通スタイリング関数を適用（日付と回数には色が付きません）
                                         styled_df = style_pivot_dataframe(pivot_df, q_name)
                                         st.dataframe(styled_df, use_container_width=True)
 
     # -----------------------------------------------------
-    # タブ2: 小テスト別 クラス全体マップ（新機能！）
+    # タブ2: 小テスト別 クラス全体マップ（既存の機能のまま変更なし）
     # -----------------------------------------------------
     with tab_quiz_all:
         st.write("特定の小テストを選択すると、それを解いた生徒全員の進捗と最高点数を一覧で確認できます✨")
@@ -225,9 +232,7 @@ def render_quiz_list_page():
         if df_all_quizzes.empty or "APIエラー発生" in df_all_quizzes.columns:
             st.info("小テストの記録がまだありません。")
         else:
-            # 誰かが記録を持っている小テストだけをリストアップ
             taken_quizzes = [q for q in df_all_quizzes['テキスト'].dropna().unique().tolist() if q]
-            
             selected_quiz_for_map = st.selectbox("📚 マップを表示する小テストを選択", taken_quizzes, index=None, placeholder="-- 小テストを選択 --")
             
             if selected_quiz_for_map:
@@ -238,10 +243,7 @@ def render_quiz_list_page():
                 if df_q.empty:
                     st.info("有効な点数記録がありません。")
                 else:
-                    # 全生徒の最高点を算出
                     best_scores_all = df_q.groupby(['名前', '単元'])['点数'].max().reset_index()
-                    
-                    # ピボットテーブル作成: 行=生徒名、列=単元、値=点数
                     pivot_all = best_scores_all.pivot_table(
                         index='名前',
                         columns='単元',
@@ -250,10 +252,7 @@ def render_quiz_list_page():
                     )
                     
                     if not pivot_all.empty:
-                        # 列（単元）をソート
                         pivot_all = pivot_all[sorted(pivot_all.columns.tolist(), key=sort_key)]
-                        
                         st.markdown(f"### 📊 【{selected_quiz_for_map}】 クラス全体マップ")
-                        # 🌟 共通スタイリング関数を適用（生徒名がインデックスになっても綺麗に動きます！）
                         styled_all_df = style_pivot_dataframe(pivot_all, selected_quiz_for_map)
                         st.dataframe(styled_all_df, use_container_width=True)

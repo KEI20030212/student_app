@@ -133,7 +133,6 @@ def render_search_page():
             with st.container(border=True):
                 st.markdown("**🔍 授業記録の検索条件と表示設定**")
                 
-                # 🌟 変更点1：講師名を追加するため、列数を3から4に変更
                 c1, c2, c3, c4 = st.columns(4)
                 
                 min_date = df_all['日時'].min().date() if not pd.isnull(df_all['日時'].min()) else datetime.date.today()
@@ -151,7 +150,6 @@ def render_search_page():
                 students = ["すべて"] + student_options
                 selected_student_option = c3.selectbox("👤 生徒名", students, key="lesson_student")
 
-                # 🌟 変更点2：講師名の選択肢をデータから動的に取得して設置
                 if '担当講師' in df_all.columns:
                     valid_teachers = [t for t in df_all['担当講師'].dropna().unique() if t and str(t).strip() not in ["None", "nan", ""]]
                     teachers = ["すべて"] + sorted(valid_teachers)
@@ -194,7 +192,6 @@ def render_search_page():
                 else:
                     df_filtered = df_filtered[df_filtered['生徒名'] == search_name]
             
-            # 🌟 変更点3：講師名での絞り込み条件を追加
             if selected_teacher != "すべて":
                 df_filtered = df_filtered[df_filtered['担当講師'] == selected_teacher]
 
@@ -258,7 +255,9 @@ def render_search_page():
 
             with st.container(border=True):
                 st.markdown("**🔍 小テスト記録の検索条件と表示設定**")
-                cq1, cq2 = st.columns(2)
+                
+                # 🌟 変更点：テキスト絞り込みを追加するためカラムを3つに分割！
+                cq1, cq2, cq3 = st.columns(3)
                 
                 min_q_date = df_quiz['日時'].min().date() if not pd.isnull(df_quiz['日時'].min()) else datetime.date.today()
                 max_q_date = df_quiz['日時'].max().date() if not pd.isnull(df_quiz['日時'].max()) else datetime.date.today()
@@ -266,6 +265,15 @@ def render_search_page():
                 
                 q_students = ["すべて"] + student_options
                 selected_q_student = cq2.selectbox("👤 生徒名", q_students, key="quiz_student")
+                
+                # 🌟 追加：テキストの一覧を取得して選択肢を作成
+                if 'テキスト' in df_quiz.columns:
+                    valid_texts = [t for t in df_quiz['テキスト'].dropna().unique() if t and str(t).strip() not in ["None", "nan", ""]]
+                    q_texts = ["すべて"] + sorted(valid_texts)
+                else:
+                    q_texts = ["すべて"]
+                    
+                selected_q_text = cq3.selectbox("📘 テキスト", q_texts, key="quiz_text")
 
                 st.write("")
                 quiz_columns_list = ["日時", "生徒名", "テキスト", "単元", "点数", "ミス問題番号", "タイミング"]
@@ -287,12 +295,16 @@ def render_search_page():
             if selected_q_student != "すべて":
                 search_q_name = selected_q_student.split(" - ")[1]
                 df_q_filtered = df_q_filtered[df_q_filtered['生徒名'] == search_q_name]
+                
+            # 🌟 追加：テキストでの絞り込みロジック
+            if selected_q_text != "すべて":
+                df_q_filtered = df_q_filtered[df_q_filtered['テキスト'] == selected_q_text]
 
             df_q_filtered['日時'] = df_q_filtered['日時'].dt.strftime('%Y/%m/%d')
             df_q_display = df_q_filtered.fillna("")
 
             if df_q_display.empty:
-                st.info("💡 指定された条件の小テスト記録は見つかりませんでした。\n日付の範囲を広げるか、別の生徒を選択してみてください。")
+                st.info("💡 指定された条件の小テスト記録は見つかりませんでした。\n日付の範囲を広げるか、別の生徒・テキストを選択してみてください。")
             else:
                 st.success(f"該当記録: **{len(df_q_filtered)} 件**")
                 if selected_display_q_cols:
