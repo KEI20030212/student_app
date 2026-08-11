@@ -36,7 +36,7 @@ def render_parent_reply_dashboard():
     name_col = '生徒名' if '生徒名' in df_replies.columns else '名前'
     teacher_col = '担当講師' if '担当講師' in df_replies.columns else '講師'
     reaction_col = '評価' if '評価' in df_replies.columns else ('リアクション' if 'リアクション' in df_replies.columns else 'リアクション種別')
-    text_col = '内容' if '内容' in df_replies.columns else ('返信内容' if '返信内容' in df_replies.columns else 'メモ')
+    text_col = '内容' if '内容' in df_replies.columns else ('返信内容' if '返信内容' in df_replies.columns else '返信メモ')
 
     # 日付型に変換
     df_replies[date_col] = pd.to_datetime(df_replies[date_col], errors='coerce')
