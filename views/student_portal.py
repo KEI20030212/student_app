@@ -169,13 +169,15 @@ def render_student_portal_page():
             st.write("")
             
             # ==========================================
-            # 2️⃣ 退塾予備軍アラート（サイレントアラート）
+            # 2️⃣ 退塾予備軍アラート（態度 ＆ 遅刻・欠席の複合検知）
             # ==========================================
             df_logs = cached_get_all_logs()
             alert_students = []
             
             if not df_logs.empty and "APIエラー発生" not in df_logs.columns:
                 name_col = '生徒名' if '生徒名' in df_logs.columns else '名前'
+                
+                # 必要なカラムが揃っているかチェック（出欠や遅刻時間がなくてもエラーにならない安全設計）
                 if name_col in df_logs.columns and '集中力' in df_logs.columns and 'ミスへの反応' in df_logs.columns:
                     df_logs['日時'] = pd.to_datetime(df_logs['日時'], format='mixed', errors='coerce')
                     
@@ -185,22 +187,54 @@ def render_student_portal_page():
                         if len(recent_logs) < 3: 
                             continue # データが少なすぎる場合は判定をスキップ
                             
-                        neg_count = 0
+                        attitude_neg_count = 0
+                        attend_neg_count = 0
+                        
                         for _, row in recent_logs.iterrows():
+                            # ① 授業態度のチェック
                             conc = str(row.get('集中力', ''))
                             reac = str(row.get('ミスへの反応', ''))
-                            # ネガティブなログをカウント
                             if conc in ["疲労気味", "ムラあり", "集中できない"] or reac in ["放置しようとした"]:
-                                neg_count += 1
+                                attitude_neg_count += 1
                                 
-                        ratio = neg_count / len(recent_logs)
-                        # 🌟 40%以上（5回中2回以上）ネガティブな記録があればアラート！
-                        if ratio >= 0.4: 
+                            # ② 遅刻・欠席のチェック
+                            attendance = str(row.get('出欠', ''))
+                            late_time_raw = row.get('遅刻時間', 0)
+                            
+                            # 「遅刻時間」が空欄や文字になっていてもエラーにならないように数値化
+                            try:
+                                late_time = float(late_time_raw)
+                            except (ValueError, TypeError):
+                                late_time = 0
+                                
+                            # 「欠席」の文字が含まれる、または遅刻時間が0より大きい場合はカウント
+                            if "欠席" in attendance or late_time > 0:
+                                attend_neg_count += 1
+                                
+                        total_logs = len(recent_logs)
+                        attitude_ratio = attitude_neg_count / total_logs
+                        attend_ratio = attend_neg_count / total_logs
+                        
+                        # 🌟 どちらかのメーターが40%以上（5回中2回以上）になればアラート対象！
+                        is_attitude_alert = attitude_ratio >= 0.4
+                        is_attend_alert = attend_ratio >= 0.4
+                        
+                        if is_attitude_alert or is_attend_alert:
+                            # 総合危険度は、2つのうち「よりヤバい方」の割合を採用
+                            max_ratio = max(attitude_ratio, attend_ratio)
+                            
+                            # アラートの理由をリストアップ
+                            reasons = []
+                            if is_attitude_alert:
+                                reasons.append(f"授業態度の悪化（{attitude_neg_count}回）")
+                            if is_attend_alert:
+                                reasons.append(f"遅刻・欠席の多発（{attend_neg_count}回）")
+                                
                             alert_students.append({
                                 "name": student_name,
-                                "ratio": int(ratio * 100),
-                                "count": neg_count,
-                                "total": len(recent_logs)
+                                "ratio": int(max_ratio * 100),
+                                "reasons": reasons,
+                                "total": total_logs
                             })
                             
             if alert_students:
@@ -208,10 +242,11 @@ def render_student_portal_page():
                 alert_students = sorted(alert_students, key=lambda x: x["ratio"], reverse=True)
                 
                 with st.container(border=True):
-                    st.error("🚨 **【退塾予備軍アラート】最近の授業でネガティブな様子が目立つ生徒**")
-                    st.caption("直近の授業ログで「疲労気味」「集中できない」「放置しようとした」等が40%以上記録された生徒です。早めの声かけや面談を検討してください。")
+                    st.error("🚨 **【退塾予備軍アラート】最近の様子に変化が見られる生徒**")
+                    st.caption("直近の5回の授業ログから「ネガティブな態度」や「遅刻・欠席の多発」が40%以上記録された生徒を自動検知しています。")
                     for ast in alert_students:
-                        st.markdown(f"- 👤 **{ast['name']}** さん （直近{ast['total']}回中 **{ast['count']}回** / 危険度 **{ast['ratio']}%**）")
+                        reason_text = " / ".join(ast['reasons'])
+                        st.markdown(f"- 👤 **{ast['name']}** さん （危険度: **{ast['ratio']}%**） ➡ ⚠️ **理由:** {reason_text}")
                 st.write("")
 
             # ==========================================
