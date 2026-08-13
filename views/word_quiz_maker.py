@@ -77,6 +77,8 @@ def render_word_quiz_maker_page():
         elif quiz_name == "英単語ターゲット1900(200問)":
             ranges, p_size = ["A1:AB27", "A29:AB55", "AC1:BD27", "AC29:BD55"], "A3"
             portrait_val = "false" 
+        elif quiz_name == "iワーク中3英単語(東書)":
+            ranges, p_size = ["A1:I18", "J1:R18"], "B5"
         elif quiz_name == "一問一答(理科)":
             ranges, p_size = ["A1:I23", "J1:R23"], "B5"
         elif quiz_name == "一問一答(社会)":
