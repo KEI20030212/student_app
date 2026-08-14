@@ -794,29 +794,49 @@ def get_last_page_from_sheet(name, subject):
     except Exception as e:
         return 0
 
-def save_self_study_record(date, name, start_time, end_time, break_time, actual_minutes, content, points):
-    """自習の記録を「自習記録」シートに保存する（APIエラー対策版）"""
+def save_self_study_record(date, name, start_time, end_time, break_time, actual_minutes, subject, content, points, grade_category="その他"):
+    """自習の記録を全体シートと学年別シートの2箇所に同時保存する（APIエラー対策版）"""
     import time
+    
+    # 🌟 各学年のスプレッドシートID
+    GRADE_SHEET_IDS = {
+        "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
+        "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
+        "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
+    }
+    
     max_retries = 3
     for attempt in range(max_retries):
         try:
             gc = get_gc_client()
-            sh = gc.open_by_key(SPREADSHEET_ID)
-            worksheet = sh.worksheet("自習記録")
             
+            # 🌟 先生ご指定の順番に変更しました！
             row_data = [
-                str(date),
-                name,
-                str(start_time),
-                str(end_time),
-                break_time,
-                actual_minutes,
-                content,
-                points
+                str(date),         # 1列目: 日付
+                name,              # 2列目: 名前
+                subject,           # 3列目: 科目
+                actual_minutes,    # 4列目: 実質勉強時間
+                str(start_time),   # 5列目: 開始時間
+                str(end_time),     # 6列目: 終了時間
+                break_time,        # 7列目: 休憩
+                content,           # 8列目: 内容
+                points             # 9列目: ポイント
             ]
             
-            worksheet.append_row(row_data)
+            # 1️⃣ 全体用のスプレッドシート（マスター）に保存
+            sh_main = gc.open_by_key(SPREADSHEET_ID)
+            worksheet_main = sh_main.worksheet("自習記録")
+            worksheet_main.append_row(row_data)
+            
+            # 2️⃣ 学年別のスプレッドシートにも保存（該当する場合）
+            target_sheet_id = GRADE_SHEET_IDS.get(grade_category)
+            if target_sheet_id and target_sheet_id != "ここに小学生用スプレッドシートのIDを入れる":
+                sh_sub = gc.open_by_key(target_sheet_id)
+                worksheet_sub = sh_sub.worksheet("自習記録")
+                worksheet_sub.append_row(row_data)
+                
             return True, "成功"
+            
         except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(2) # 失敗したら2秒待って再試行
@@ -1698,6 +1718,7 @@ def save_parent_reply(date_str, student_id, student_name, teacher_name, reaction
     except:
         return False
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_parent_reply_data():
     """保護者からの返信・リアクション履歴をすべて取得する"""
     try:
