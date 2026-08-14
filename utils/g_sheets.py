@@ -1333,6 +1333,62 @@ def load_self_study_data():
         import pandas as pd
         return pd.DataFrame()
 
+def sync_self_study_settings_add(name, grade_raw):
+    """新入生を自習管理スプレッドシートの「設定」シートに自動追加する"""
+    import time
+    GRADE_SHEET_IDS = {
+        "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
+        "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
+        "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
+    }
+    
+    grade_category = "その他"
+    if "小" in grade_raw: grade_category = "小学生"
+    elif "中" in grade_raw: grade_category = "中学生"
+    elif "高" in grade_raw: grade_category = "高校生"
+    
+    target_sheet_id = GRADE_SHEET_IDS.get(grade_category)
+    if not target_sheet_id: return True, "対象外"
+
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(target_sheet_id)
+        worksheet = sh.worksheet("設定")
+        
+        # A列の一番下に追加（名前のみ）
+        worksheet.append_row([name])
+        return True, "成功"
+    except Exception as e:
+        return False, str(e)
+
+def sync_self_study_settings_remove(name):
+    """退塾生を自習管理スプレッドシートの「設定」シートから自動削除する"""
+    import time
+    GRADE_SHEET_IDS = {
+        "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
+        "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
+        "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
+    }
+    
+    try:
+        gc = get_gc_client()
+        # 退塾時は学年が変わっている可能性も考慮し、小中高すべてのシートを探して消す最強仕様
+        for sheet_id in GRADE_SHEET_IDS.values():
+            try:
+                sh = gc.open_by_key(sheet_id)
+                worksheet = sh.worksheet("設定")
+                
+                # A列のデータを取得して、名前があるか探す
+                records = worksheet.col_values(1)
+                if name in records:
+                    row_idx = records.index(name) + 1 # スプレッドシートは1行目から始まるため+1
+                    worksheet.delete_rows(row_idx)
+            except:
+                continue # エラーがあっても他のシートを探し続ける
+        return True, "成功"
+    except Exception as e:
+        return False, str(e)
+
 #quiz_dashboard.py
 @st.cache_data(ttl=600, show_spinner=False)
 def get_quiz_master_dict():
