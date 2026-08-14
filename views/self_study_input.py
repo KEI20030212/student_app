@@ -30,11 +30,28 @@ def render_self_study_input_page():
         ss_options = ["🆕 新規登録"] + student_options
         ss_name = st.selectbox("👤 生徒を選択", ss_options, index=None, placeholder="生徒を選択", key="ss_name")
         
+        grade_category = "その他" # デフォルト値
+        
         if ss_name == "🆕 新規登録": 
             ss_name = st.text_input("新しい生徒の名前", key="ss_new_name")
+            # 新規の時は保存先をプルダウンで選ばせる
+            grade_category = st.selectbox("🏫 学年区分（保存先スプレッドシートの決定に使用）", ["小学生", "中学生", "高校生", "その他"])
+            
+        elif ss_name:
+            # 🌟 生徒マスタから学年を読み取り、小・中・高を自動判別！
+            student_id = ss_name.split(" - ")[0]
+            student_row = student_df[student_df['生徒ID'].astype(str) == student_id]
+            if not student_row.empty and '学年' in student_row.columns:
+                grade_raw = str(student_row['学年'].values[0])
+                if "小" in grade_raw: grade_category = "小学生"
+                elif "中" in grade_raw: grade_category = "中学生"
+                elif "高" in grade_raw: grade_category = "高校生"
         
         if ss_name:
             num_days = st.number_input("🗓️ 登録する日数", min_value=1, max_value=14, value=1, key="ss_num_days")
+            
+            # 自動判別した保存先を先生にチラ見せして安心感を出す
+            st.caption(f"💡 保存先: 全体用シート ＋ 【 {grade_category} 】用シート")
             st.divider()
             
             ss_records = []
@@ -62,10 +79,13 @@ def render_self_study_input_page():
                 total_earned_points += pts
                 
                 st.caption(f"⏱️ 滞在: {diff_min}分 ／ 🔥 実質勉強時間: **{actual_min}分** （獲得: {pts}pt）")
-                ss_memo = st.text_area("📖 学習内容（テキスト名など）", height=70, key=f"m_{d}")
+                
+                col_sub, col_memo = st.columns([1, 2])
+                ss_sub = col_sub.selectbox("📚 科目", ["英語", "数学", "国語", "理科", "社会", "その他"], key=f"sub_{d}")
+                ss_memo = col_memo.text_area("📖 学習内容（テキスト名など）", height=68, key=f"m_{d}")
                 
                 ss_records.append({
-                    "date": ss_date, "start": s_time, "end": e_time, 
+                    "date": ss_date, "start": s_time, "end": e_time, "subject": ss_sub,
                     "break": b_min, "actual": actual_min, "content": ss_memo, "pts": pts
                 })
                 st.divider()
@@ -77,10 +97,19 @@ def render_self_study_input_page():
                     pure_name = ss_name.split(" - ")[1] if " - " in ss_name else ss_name
 
                     for idx, rec in enumerate(ss_records):
+                        # 🌟 grade_category（学年）も渡すように変更！
                         ok, msg = robust_api_call(
                             save_self_study_record,
-                            rec["date"], pure_name, rec["start"], rec["end"], 
-                            rec["break"], rec["actual"], rec["content"], rec["pts"],
+                            date=rec["date"], 
+                            name=pure_name, 
+                            start_time=rec["start"], 
+                            end_time=rec["end"], 
+                            break_time=rec["break"], 
+                            actual_minutes=rec["actual"],
+                            subject=rec["subject"], 
+                            content=rec["content"], 
+                            points=rec["pts"],
+                            grade_category=grade_category, # ここで学年を裏側に伝えます
                             fallback_value=(False, "エラー")
                         )
                         if ok:
@@ -99,5 +128,5 @@ def render_self_study_input_page():
                         time.sleep(2)
                         
                         for k in list(st.session_state.keys()):
-                            if k.startswith(("d_","s_","e_","b_","m_","ss_")): del st.session_state[k]
+                            if k.startswith(("d_","s_","e_","b_","m_","sub_","ss_")): del st.session_state[k]
                         st.rerun()
