@@ -4,13 +4,14 @@ import pandas as pd
 import datetime
 import re
 
-# 🌟 get_all_logs を追加でインポート
 from utils.g_sheets import (
     get_student_master, 
     get_student_info, 
     update_student_info,
     move_student_to_inactive_sheet,
-    get_all_logs 
+    get_all_logs,
+    sync_self_study_settings_add,       # 🌟 追加：自習シートに自動追加する機能
+    sync_self_study_settings_remove     # 🌟 追加：自習シートから自動削除する機能
 )
 from utils.api_guard import robust_api_call
 
@@ -19,7 +20,6 @@ from views.analysis import render_analysis_page
 from views.conference_report import render_conference_report
 from views.admin_tools import render_admin_tools_page 
 
-# 🌟 修正：裏側でキャッシュされているので、二重キャッシュ防止のため@st.cache_dataを削除！
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
@@ -45,7 +45,6 @@ def render_student_portal_page():
         if not df_students.empty and '生徒ID' in df_students.columns and '生徒名' in df_students.columns:
             student_options = (df_students['生徒ID'].astype(str) + " - " + df_students['生徒名']).tolist()
             
-    # 全機能共通の生徒選択バー
     selected_student = st.selectbox("👤 対象の生徒を選択してください", student_options, index=None, placeholder="--選択--")
 
     if is_conference_mode:
@@ -55,11 +54,10 @@ def render_student_portal_page():
         st.sidebar.info("✏️ 通常モード（入力・編集）")
 
     # ==========================================
-    # 生徒が選ばれていない時の「機能紹介 ＆ 新入生登録・管理ツール画面」
+    # 生徒が選ばれていない時の処理
     # ==========================================
     if selected_student is None:
         
-        # 教室長・管理者のみ表示される本部エリア
         if st.session_state.get('role') in ['admin', 'owner', 'head_teacher'] and not is_conference_mode:
             
             if 'flash_success_msg' in st.session_state:
@@ -158,6 +156,14 @@ def render_student_portal_page():
                         success = robust_api_call(_create_student, fallback_value=False)
                         
                         if success:
+                            # 🌟 マスター登録成功後、自習管理シートの「設定」にも自動で名前を追加！
+                            robust_api_call(
+                                sync_self_study_settings_add,
+                                name=new_name.strip(),
+                                grade_raw=new_grade.strip(),
+                                fallback_value=(False, "")
+                            )
+                            
                             st.cache_data.clear()
                             form_placeholder.empty() 
                             st.session_state['flash_success_msg'] = f"🎉 新入生「{new_name}」さんのシステム登録が完了しました！（生徒ID: {final_student_id}）\n上のリストから名前を選択して、詳細データの入力を開始できます。"
@@ -169,7 +175,7 @@ def render_student_portal_page():
             st.write("")
             
             # ==========================================
-            # 2️⃣ 退塾予備軍アラート（態度 ＆ 遅刻・欠席の複合検知）
+            # 2️⃣ 退塾予備軍アラート
             # ==========================================
             df_logs = cached_get_all_logs()
             alert_students = []
@@ -177,37 +183,30 @@ def render_student_portal_page():
             if not df_logs.empty and "APIエラー発生" not in df_logs.columns:
                 name_col = '生徒名' if '生徒名' in df_logs.columns else '名前'
                 
-                # 必要なカラムが揃っているかチェック（出欠や遅刻時間がなくてもエラーにならない安全設計）
                 if name_col in df_logs.columns and '集中力' in df_logs.columns and 'ミスへの反応' in df_logs.columns:
                     df_logs['日時'] = pd.to_datetime(df_logs['日時'], format='mixed', errors='coerce')
                     
-                    # 生徒ごとに直近5回のログをチェック
                     for student_name, group in df_logs.groupby(name_col):
                         recent_logs = group.sort_values('日時', ascending=False).head(5)
                         if len(recent_logs) < 3: 
-                            continue # データが少なすぎる場合は判定をスキップ
+                            continue 
                             
                         attitude_neg_count = 0
                         attend_neg_count = 0
                         
                         for _, row in recent_logs.iterrows():
-                            # ① 授業態度のチェック
                             conc = str(row.get('集中力', ''))
                             reac = str(row.get('ミスへの反応', ''))
                             if conc in ["疲労気味", "ムラあり", "集中できない"] or reac in ["放置しようとした"]:
                                 attitude_neg_count += 1
                                 
-                            # ② 遅刻・欠席のチェック
                             attendance = str(row.get('出欠', ''))
                             late_time_raw = row.get('遅刻時間', 0)
-                            
-                            # 「遅刻時間」が空欄や文字になっていてもエラーにならないように数値化
                             try:
                                 late_time = float(late_time_raw)
                             except (ValueError, TypeError):
                                 late_time = 0
                                 
-                            # 「欠席」の文字が含まれる、または遅刻時間が0より大きい場合はカウント
                             if "欠席" in attendance or late_time > 0:
                                 attend_neg_count += 1
                                 
@@ -215,15 +214,11 @@ def render_student_portal_page():
                         attitude_ratio = attitude_neg_count / total_logs
                         attend_ratio = attend_neg_count / total_logs
                         
-                        # 🌟 どちらかのメーターが40%以上（5回中2回以上）になればアラート対象！
                         is_attitude_alert = attitude_ratio >= 0.4
                         is_attend_alert = attend_ratio >= 0.4
                         
                         if is_attitude_alert or is_attend_alert:
-                            # 総合危険度は、2つのうち「よりヤバい方」の割合を採用
                             max_ratio = max(attitude_ratio, attend_ratio)
-                            
-                            # アラートの理由をリストアップ
                             reasons = []
                             if is_attitude_alert:
                                 reasons.append(f"授業態度の悪化（{attitude_neg_count}回）")
@@ -238,9 +233,7 @@ def render_student_portal_page():
                             })
                             
             if alert_students:
-                # 危険度（割合）が高い順に並べ替え
                 alert_students = sorted(alert_students, key=lambda x: x["ratio"], reverse=True)
-                
                 with st.container(border=True):
                     st.error("🚨 **【退塾予備軍アラート】最近の様子に変化が見られる生徒**")
                     st.caption("直近の5回の授業ログから「ネガティブな態度」や「遅刻・欠席の多発」が40%以上記録された生徒を自動検知しています。")
@@ -250,7 +243,7 @@ def render_student_portal_page():
                 st.write("")
 
             # ==========================================
-            # 3️⃣ 新年度一括処理（管理ツール）
+            # 3️⃣ 新年度一括処理
             # ==========================================
             render_admin_tools_page()
             st.divider()
@@ -283,7 +276,7 @@ def render_student_portal_page():
             render_analysis_page(selected_student)
             
         # ==========================================
-        # 🌟 退塾手続きエリア（管理者限定 ＆ 非面談モード時）
+        # 🌟 退塾手続きエリア
         # ==========================================
         if st.session_state.get('role') in ['admin', 'owner', 'head_teacher']:
             st.write("")
@@ -294,9 +287,8 @@ def render_student_portal_page():
             target_name = selected_student.split(" - ")[1]
             
             with st.expander(f"🚨 【管理者限定】{target_name} さんの退塾・アーカイブ手続き", expanded=False):
-                st.warning(f"この操作を行うと、{target_name} さんのデータは「退塾生情報」シートに移動し、現役生リスト（授業入力や月謝計算など）から即座に除外されます。")
+                st.warning(f"この操作を行うと、{target_name} さんのデータは「退塾生情報」シートに移動し、現役生リストから即座に除外されます。")
                 
-                # 誤爆防止用の同意チェックボックス
                 confirm_archive = st.checkbox(f"本当に {target_name} さんの生徒データをアーカイブ（退塾処理）してよろしいですか？", key="chk_archive")
                 
                 if st.button(f"🚀 {target_name} さんの退塾処理を実行する", type="primary", use_container_width=True):
@@ -304,10 +296,16 @@ def render_student_portal_page():
                         st.error("⚠️ 処理を実行するには、上記のチェックボックスにチェックを入れてください。")
                     else:
                         with st.spinner("データベースの引っ越し処理を実行中..."):
-                            # 引っ越し関数の呼び出し
                             success, err_msg = robust_api_call(move_student_to_inactive_sheet, target_id, fallback_value=(False, "通信タイムアウト"))
                             
                             if success:
+                                # 🌟 マスターから削除された直後、自習管理シートの「設定」からも自動で名前を削除！
+                                robust_api_call(
+                                    sync_self_study_settings_remove,
+                                    name=target_name,
+                                    fallback_value=(False, "")
+                                )
+                                
                                 st.cache_data.clear()
                                 st.session_state['flash_success_msg'] = f"✅ {target_name} さんの退塾アーカイブ処理が正常に完了しました。"
                                 st.success("処理が完了しました！画面を更新します...")
