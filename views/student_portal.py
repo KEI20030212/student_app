@@ -1,3 +1,4 @@
+#田端東十条版
 import streamlit as st
 import time
 import pandas as pd
@@ -10,8 +11,8 @@ from utils.g_sheets import (
     update_student_info,
     move_student_to_inactive_sheet,
     get_all_logs,
-    sync_self_study_settings_add,       # 🌟 追加：自習シートに自動追加する機能
-    sync_self_study_settings_remove     # 🌟 追加：自習シートから自動削除する機能
+    sync_self_study_settings_add,
+    sync_self_study_settings_remove
 )
 from utils.api_guard import robust_api_call
 
@@ -156,9 +157,10 @@ def render_student_portal_page():
                         success = robust_api_call(_create_student, fallback_value=False)
                         
                         if success:
-                            # 🌟 マスター登録成功後、自習管理シートの「設定」にも自動で名前を追加！
+                            # 🌟 変更：生徒ID（final_student_id）も一緒に送る！
                             robust_api_call(
                                 sync_self_study_settings_add,
+                                student_id=final_student_id,
                                 name=new_name.strip(),
                                 grade_raw=new_grade.strip(),
                                 fallback_value=(False, "")
@@ -299,9 +301,10 @@ def render_student_portal_page():
                             success, err_msg = robust_api_call(move_student_to_inactive_sheet, target_id, fallback_value=(False, "通信タイムアウト"))
                             
                             if success:
-                                # 🌟 マスターから削除された直後、自習管理シートの「設定」からも自動で名前を削除！
+                                # 🌟 変更：生徒ID（target_id）も一緒に送る！
                                 robust_api_call(
                                     sync_self_study_settings_remove,
+                                    student_id=target_id,
                                     name=target_name,
                                     fallback_value=(False, "")
                                 )
