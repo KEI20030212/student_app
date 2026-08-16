@@ -1333,58 +1333,131 @@ def load_self_study_data():
         import pandas as pd
         return pd.DataFrame()
 
-def sync_self_study_settings_add(name, grade_raw):
-    """新入生を自習管理スプレッドシートの「設定」シートに自動追加する"""
+def sync_self_study_settings_add(student_id, name, grade_raw):
+    """新入生を自習管理スプレッドシートの「設定」シートに自動追加する（複数校舎対応）"""
     import time
-    GRADE_SHEET_IDS = {
-        "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
-        "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
-        "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
-    }
     
+    # 🌟 生徒IDの1文字目を取得して小文字に変換（t または h）
+    prefix = str(student_id)[0].lower()
+    
+    if prefix == 'h':
+        # 🏢 東十条校用のスプレッドシートID（※ここにIDを設定してください！）
+        GRADE_SHEET_IDS = {
+            "小学生": "1n0NvREF5Sf8WHMVOXXHCfm6EhsYDtcDd0qB4dXMR4c8",
+            "中学生": "1okTYoVDhBfZzjcq5bVBeMxqc-7Ocv1Woz4JISDI3vGQ",
+            "高校生": "12fWkakGZPt8it_OxZNmddDOimzM0CTmCrD2GS5mIX2U"
+        }
+    else:
+        # 🏢 田端新町校用のスプレッドシートID（tから始まる場合、または数字だけの場合）
+        GRADE_SHEET_IDS = {
+            "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
+            "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
+            "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
+        }
+
     grade_category = "その他"
     if "小" in grade_raw: grade_category = "小学生"
     elif "中" in grade_raw: grade_category = "中学生"
     elif "高" in grade_raw: grade_category = "高校生"
     
     target_sheet_id = GRADE_SHEET_IDS.get(grade_category)
-    if not target_sheet_id: return True, "対象外"
+    # IDがまだ設定されていない場合はスキップする安全設計
+    if not target_sheet_id or target_sheet_id.startswith("ここ"): return True, "対象外"
 
     try:
         gc = get_gc_client()
         sh = gc.open_by_key(target_sheet_id)
         worksheet = sh.worksheet("設定")
         
-        # A列の一番下に追加（名前のみ）
-        worksheet.append_row([name])
+        records_a_col = worksheet.col_values(1)
+        next_row = len(records_a_col) + 1
+        worksheet.update_cell(next_row, 1, name)
+        
+        try:
+            sh.worksheet(name) # すでにシートが存在するかチェック
+        except:
+            # シートが存在しない場合のみ作成処理を行う
+            template_ws = sh.worksheet("テンプレート")
+            new_ws = sh.duplicate_sheet(template_ws.id, new_sheet_name=name)
+            
+            # B8〜B12の数式を取得
+            formulas = template_ws.get("B8:B12", value_render_option="FORMULA")
+            new_formulas = []
+            
+            for row in formulas:
+                if row and len(row) > 0:
+                    # "'設定'!A1" を "生徒名" に置換（先生のマクロと同じ処理）
+                    f_str = str(row[0]).replace("'設定'!A1", f'"{name}"')
+                    new_formulas.append([f_str])
+                else:
+                    new_formulas.append([""])
+                    
+            try:
+                new_ws.update(values=new_formulas, range_name="B8:B12", value_input_option="USER_ENTERED")
+            except TypeError:
+                new_ws.update("B8:B12", new_formulas, value_input_option="USER_ENTERED")
         return True, "成功"
     except Exception as e:
         return False, str(e)
 
-def sync_self_study_settings_remove(name):
-    """退塾生を自習管理スプレッドシートの「設定」シートから自動削除する"""
+def sync_self_study_settings_remove(student_id, name):
+    """退塾生を自習管理スプレッドシートの「設定」シートから自動削除する（複数校舎対応）"""
     import time
-    GRADE_SHEET_IDS = {
-        "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
-        "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
-        "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
-    }
+    
+    prefix = str(student_id)[0].lower()
+    
+    if prefix == 'h':
+        # 🏢 東十条校用のスプレッドシートID
+        GRADE_SHEET_IDS = {
+            "小学生": "1n0NvREF5Sf8WHMVOXXHCfm6EhsYDtcDd0qB4dXMR4c8",
+            "中学生": "1okTYoVDhBfZzjcq5bVBeMxqc-7Ocv1Woz4JISDI3vGQ",
+            "高校生": "12fWkakGZPt8it_OxZNmddDOimzM0CTmCrD2GS5mIX2U"
+        }
+    else:
+        # 🏢 田端新町校用のスプレッドシートID
+        GRADE_SHEET_IDS = {
+            "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
+            "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
+            "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
+        }
     
     try:
         gc = get_gc_client()
-        # 退塾時は学年が変わっている可能性も考慮し、小中高すべてのシートを探して消す最強仕様
         for sheet_id in GRADE_SHEET_IDS.values():
+            if sheet_id.startswith("ここ"): continue
             try:
                 sh = gc.open_by_key(sheet_id)
                 worksheet = sh.worksheet("設定")
                 
-                # A列のデータを取得して、名前があるか探す
                 records = worksheet.col_values(1)
                 if name in records:
-                    row_idx = records.index(name) + 1 # スプレッドシートは1行目から始まるため+1
+                    row_idx = records.index(name) + 1 
                     worksheet.delete_rows(row_idx)
+                    
+                    protected_sheets = ['設定', 'テンプレート', '自習記録', '棒グラフ']
+                    if name not in protected_sheets:
+                        try:
+                            target_ws = sh.worksheet(name)
+                            sh.del_worksheet(target_ws)
+                        except:
+                            pass
             except:
-                continue # エラーがあっても他のシートを探し続ける
+                continue 
+        return True, "成功"
+    except Exception as e:
+        return False, str(e)
+
+def update_self_study_dashboard_date(sheet_id, year, month):
+    """自習ダッシュボードの年月（設定シートのC1, D1）を更新する"""
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(sheet_id)
+        worksheet = sh.worksheet("設定")
+        
+        # C1セルに「年」、D1セルに「月」を書き込む
+        worksheet.update_acell('C1', year)
+        worksheet.update_acell('D1', month)
+        
         return True, "成功"
     except Exception as e:
         return False, str(e)
