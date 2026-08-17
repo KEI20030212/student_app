@@ -16,10 +16,10 @@ def cached_load_self_study_by_student(student_name):
     from utils.g_sheets import load_self_study_data
     df = robust_api_call(load_self_study_data, fallback_value=pd.DataFrame())
 
-    if df.empty or '生徒名' not in df.columns or "APIエラー発生" in df.columns:
+    if df.empty or '名前' not in df.columns or "APIエラー発生" in df.columns:
         return pd.DataFrame()
     
-    df_student = df[df['生徒名'] == student_name].copy()
+    df_student = df[df['名前'] == student_name].copy()
     if df_student.empty:
         return pd.DataFrame()
         
@@ -39,7 +39,6 @@ def safe_load_test_scores():
     from utils.g_sheets import load_test_scores
     return robust_api_call(load_test_scores, fallback_value=pd.DataFrame())
 
-# 🌟 修正箇所：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_get_textbook_master():
     from utils.g_sheets import get_textbook_master
     return robust_api_call(get_textbook_master, fallback_value={})
@@ -79,6 +78,50 @@ def cached_calculate_attendance_rate(student_id, student_name):
     
     if total_lessons == 0: return "0% (履歴なし)"
     rate = (attend_count / total_lessons) * 100
+    return f"{int(rate)}%"
+
+# ==========================================
+# 🌟 追加：宿題履行率をログから自動計算する関数
+# ==========================================
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_calculate_homework_rate(student_id, student_name):
+    from utils.g_sheets import get_all_logs
+    df_all_logs_raw = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
+
+    if df_all_logs_raw.empty or "APIエラー発生" in df_all_logs_raw.columns:
+        return "データなし"
+        
+    df_all_logs = df_all_logs_raw.copy()
+    
+    if student_id != "未設定" and '生徒ID' in df_all_logs.columns:
+        df_student = df_all_logs[df_all_logs['生徒ID'].astype(str) == str(student_id)]
+    else:
+        name_col = '名前' if '名前' in df_all_logs.columns else '生徒名'
+        if name_col in df_all_logs.columns:
+            df_student = df_all_logs[df_all_logs[name_col] == student_name]
+        else:
+            return "データなし"
+
+    if df_student.empty:
+        return "100% (履歴なし)"
+        
+    if '出した宿題P' not in df_student.columns or 'やった宿題P' not in df_student.columns:
+        return "データなし"
+
+    # 数値化して欠損値を0にする
+    assigned = pd.to_numeric(df_student['出した宿題P'], errors='coerce').fillna(0)
+    done = pd.to_numeric(df_student['やった宿題P'], errors='coerce').fillna(0)
+    
+    total_assigned = assigned.sum()
+    total_done = done.sum()
+    
+    # 宿題がまだ一度も出されていない場合は100%（警告回避）とする
+    if total_assigned == 0:
+        return "100% (宿題なし)"
+        
+    rate = (total_done / total_assigned) * 100
+    rate = min(rate, 100.0) # 余分にやった場合でも上限100%にする
+    
     return f"{int(rate)}%"
 
 def cached_get_student_master_for_report():
@@ -154,16 +197,18 @@ def render_conference_report(selected_student_option, info):
     st.subheader("🔥 学習への取り組み姿勢")
     col1, col2, col3, col4 = st.columns(4)
     
-    with st.spinner("出席率を計算中..."):
+    # 🌟 変更：マスタの数字ではなく、ログから宿題履行率を自動計算して取得！
+    with st.spinner("出席率・宿題進捗を計算中..."):
         attendance_rate = cached_calculate_attendance_rate(student_id, student_name)
+        hw_rate_str = cached_calculate_homework_rate(student_id, student_name)
     
-    hw_rate_str = str(info.get('宿題履行率', '0')).replace('%', '')
+    # "85%" などの文字列から数字だけを取り出して評価メッセージ用に使う
     try:
-        hw_rate = float(hw_rate_str)
-    except ValueError:
+        hw_rate = float(hw_rate_str.replace('%', '').split()[0])
+    except Exception:
         hw_rate = 0.0
 
-    col1.metric("🏠 宿題履行率", f"{hw_rate}%")
+    col1.metric("🏠 宿題履行率", hw_rate_str)
     col2.metric("📅 出席率", attendance_rate)
     
     total_quiz_attempts = len(df_quiz) if not df_quiz.empty else 0
@@ -252,14 +297,21 @@ def render_conference_report(selected_student_option, info):
     # 3. 小テスト進捗の一覧
     # ==========================================
     st.subheader("📊 小テスト（基礎学力）の定着状況")
-    if master_dict is not None and not df_quiz.empty: 
+    
+    st.markdown("**【合格の基準について】**")
+    st.caption("各単元の小テストにおいて、満点に対する**正答率が80%以上**を獲得したものを「合格（定着済み）」として進捗にカウントしています。")
+    st.write("") 
+
+    if not df_quiz.empty:
         df_quiz['点数'] = pd.to_numeric(df_quiz['点数'], errors='coerce')
+        df_quiz['正答率'] = df_quiz.apply(lambda row: calculate_score_ratio(row, quiz_details), axis=1)
+
+    if master_dict is not None and not df_quiz.empty: 
         summary_data = []
-        
         attempted_texts = df_quiz['テキスト'].dropna().unique()
         
         for text_name in attempted_texts:
-            df_text = df_quiz[(df_quiz['テキスト'] == text_name) & (df_quiz['点数'] >= 80)]
+            df_text = df_quiz[(df_quiz['テキスト'] == text_name) & (df_quiz['正答率'] >= 0.8)]
             done_chaps = df_text['単元'].nunique() if '単元' in df_text.columns else 0
             
             if text_name in master_dict:
@@ -280,12 +332,16 @@ def render_conference_report(selected_student_option, info):
             
         if summary_data:
             df_summary = pd.DataFrame(summary_data)
+            
+            dynamic_height = max(200, len(df_summary) * 40)
+            
             bar_chart = alt.Chart(df_summary).mark_bar().encode(
                 x=alt.X('進捗率(%):Q', scale=alt.Scale(domain=[0, 100])),
                 y=alt.Y('テキスト名:N', sort='-x'),
                 color=alt.Color('進捗率(%):Q', scale=alt.Scale(scheme='blues')),
                 tooltip=['テキスト名', '進捗率(%)', '合格章数']
-            ).properties(height=200)
+            ).properties(height=dynamic_height) 
+            
             st.altair_chart(bar_chart, use_container_width=True)
             
             st.table(df_summary.set_index("テキスト名"))
@@ -299,21 +355,15 @@ def render_conference_report(selected_student_option, info):
     # ==========================================
     st.subheader("💡 優先して復習すべき単元（自動ピックアップ）")
     if not df_quiz.empty:
-        # 🌟 外部から持ってきた計算専門の関数（calculate_score_ratio）を使う！
-        df_quiz['正答率'] = df_quiz.apply(lambda row: calculate_score_ratio(row, quiz_details), axis=1)
-        
-        # 正答率60%未満を弱点として抽出
         df_weak = df_quiz[df_quiz['正答率'] < 0.6].sort_values(by='日時', ascending=False).head(5)
         
         if not df_weak.empty:
             st.write("以下の単元は、直近のテストで点数が伸び悩んだため、次回の授業や講習で優先的に対策を行います。")
             
-            # 🌟 【新機能】単元（章数）にテキストマスタの単元名を合体させる魔法！
             def format_weak_unit(row):
                 t_name = str(row.get('テキスト', ''))
                 chap_str = str(row.get('単元', ''))
                 
-                # そのテスト（テキスト）の単元マスタを引っ張ってくる
                 t_master = master_dict.get(t_name, {})
                 chap_name = t_master.get(chap_str, "")
                 
@@ -322,7 +372,6 @@ def render_conference_report(selected_student_option, info):
                 else:
                     return f"第{chap_str}回"
                     
-            # 弱点データフレームの「単元」列を一括で書き換え
             df_weak['単元'] = df_weak.apply(format_weak_unit, axis=1)
             
             desired_columns = ['日時', 'テキスト', '単元', '点数', 'ミス番号', '間違えた問題', 'ミス問題番号', 'ミス']
