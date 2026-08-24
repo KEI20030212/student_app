@@ -643,6 +643,39 @@ def get_all_teacher_names():
     # 🌟 リストの原本を保護するため、list() でコピーして返す（Mutation Error対策）
     return list(lst)
 
+def background_ai_tasks_bulk(spreadsheet_id, sheet_name, start_row, ai_tasks_info):
+    from utils.ai_feedback import generate_ai_feedback
+    
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(spreadsheet_id)
+        worksheet = sh.worksheet(sheet_name)
+        
+        # リスト（名簿）を上から順番に1件ずつ処理していく
+        for i, info in enumerate(ai_tasks_info):
+            current_row_index = start_row + i
+            
+            # AIを呼び出してスコアとコメントを作成
+            ai_score, ai_comment = generate_ai_feedback(
+                student_name=info[0],
+                subject=info[1],
+                homework_status=info[2],
+                concentration=info[3],
+                report_text=info[4]
+            )
+
+            # 1件ずつスプレッドシートを更新
+            worksheet.update(
+                values=[[ai_comment, ai_score]],
+                range_name=f"Y{current_row_index}:Z{current_row_index}"
+            )
+            
+            # 🌟 超重要：Googleに怒られないよう、次の処理の前に「3秒休憩」する！
+            time.sleep(3)
+            
+    except Exception as e:
+        print(f"バックグラウンドバルク更新エラー: {e}")
+
 def background_ai_task(spreadsheet_id, sheet_name, row_index, student_name, subject, homework_status, concentration, report_text):
     from utils.ai_feedback import generate_ai_feedback
     # AIを呼び出してスコアとコメントを自動作成
@@ -714,14 +747,11 @@ def save_logs_to_spreadsheet(rows):
     if match:
         start_row = int(match.group(1))
         
-        # 各行ごとに、裏側でAI担当スタッフ（別スレッド）を走らせる
-        for i, info in enumerate(ai_tasks_info):
-            current_row_index = start_row + i
-            t = threading.Thread(
-                target=background_ai_task,
-                args=(SPREADSHEET_ID, "授業ログ統合", current_row_index, *info)
-            )
-            t.start() # バックグラウンド処理スタート！
+        t = threading.Thread(
+            target=background_ai_tasks_bulk,
+            args=(SPREADSHEET_ID, "授業ログ統合", start_row, ai_tasks_info)
+        )
+        t.start() # バックグラウンド処理スタート！
             
     return True
 
