@@ -34,7 +34,7 @@ def render_feedback_board():
         return
         
     # 🌟 自分が担当した授業ログだけを抽出する（管理者の場合は全員分を表示！）
-    if user_role in ['admin', 'owner', 'head_teacher']:
+    if user_role in ['admin', 'owner', 'AM']:
         st.info("※管理者モードのため、全講師の最新フィードバックをまとめて表示しています。")
         df_my_logs = df_logs.copy()
     else:
