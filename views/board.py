@@ -12,6 +12,7 @@ from utils.g_sheets import (
     load_transfer_requests 
 )
 from utils.api_guard import robust_api_call
+from views.feedback_board import render_feedback_board
 
 def safe_get_all_logs():
     df = robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
@@ -188,3 +189,9 @@ def render_home_page():
                         st.rerun()
                     else:
                         st.error("通信エラーにより更新できませんでした。")
+    st.divider()
+    
+    # ==========================================
+    # 🌟 4. 個別フィードバックエリア（部品を呼び出すだけ！）
+    # ==========================================
+    render_feedback_board()
