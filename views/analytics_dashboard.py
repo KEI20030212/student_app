@@ -20,11 +20,9 @@ def calculate_page_amount(text):
 def cached_get_all_logs():
     return robust_api_call(get_all_logs, fallback_value=pd.DataFrame())
 
-# 🌟 修正：二重キャッシュ防止のため @st.cache_data を削除！
 def cached_load_quiz_records():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=60)
 def cached_load_parent_reply_data():
     return robust_api_call(load_parent_reply_data, fallback_value=pd.DataFrame())
 
@@ -78,7 +76,7 @@ def render_analytics_dashboard_page():
         quiz_done = pd.DataFrame(columns=['日付', '生徒名', '小テスト実施'])
 
     df_all = df_all.merge(quiz_done, on=['日付', '生徒名'], how='left')
-    df_all['小テスト実施'] = df_all['小テスト実施'].fillna(False)
+    df_all['小テスト実施'] = df_all['小テスト実施'].fillna(False).infer_objects(copy=False)
 
     # --- 保護者リアクションの結合 ---
     if not df_reply.empty and "APIエラー発生" not in df_reply.columns:
@@ -250,8 +248,8 @@ def render_analytics_dashboard_page():
         with col_r2:
             df_t_react_only = df_t[df_t['保護者リアクション'] != "🔵 既読スルー（自動カウント）"]
             if not df_t_react_only.empty:
-                df_t_pivot = pd.crosstab(df_t_react_only['担当講師'], df_t_react_only['保護者リアクション'])
-                st.bar_chart(df_t_pivot, stack=True)
+                chart_data = df_t_react_only.groupby(['担当講師', '保護者リアクション']).size().reset_index(name='件数')
+                st.bar_chart(chart_data, x='担当講師', y='件数', color='保護者リアクション')
             else:
                 st.info("今月はまだ保護者からのポジティブリアクションはありません。")
             
