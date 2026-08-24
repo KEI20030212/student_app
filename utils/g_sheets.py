@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 import base64
 import pickle
 import altair as alt # 座標グラフを描くための魔法の絵の具
+import threading
 
 def get_jst_now():
     """現在時刻を日本時間(JST)で取得する"""
@@ -642,10 +643,34 @@ def get_all_teacher_names():
     # 🌟 リストの原本を保護するため、list() でコピーして返す（Mutation Error対策）
     return list(lst)
 
+def background_ai_task(spreadsheet_id, sheet_name, row_index, student_name, subject, homework_status, concentration, report_text):
+    from utils.ai_feedback import generate_ai_feedback
+    # AIを呼び出してスコアとコメントを自動作成
+    ai_score, ai_comment = generate_ai_feedback(
+        student_name=student_name,
+        subject=subject,
+        homework_status=homework_status,
+        concentration=concentration,
+        report_text=report_text
+    )
+
+    try:
+        # スプレッドシートをこっそり再度開いて、仮文字を上書きする
+        gc = get_gc_client()
+        sh = gc.open_by_key(spreadsheet_id)
+        worksheet = sh.worksheet(sheet_name)
+        
+        # Y列（25番目）、Z列（26番目）をピンポイントで上書き更新！
+        worksheet.update(
+            values=[[ai_comment, ai_score]],
+            range_name=f"Y{row_index}:Z{row_index}"
+        )
+    except Exception as e:
+        print(f"バックグラウンドAI更新エラー: {e}")
+
 def save_logs_to_spreadsheet(rows):
     """
     【バルク対応】授業ログ統合シートに複数行の記録をまとめて一括保存する関数
-    rows: [ [日時, 生徒ID, 名前, ...], [...], ... ] の二次元リスト（27列構成）
     """
     if not rows:
         return True
@@ -654,7 +679,50 @@ def save_logs_to_spreadsheet(rows):
     sh = gc.open_by_key(SPREADSHEET_ID)
     worksheet = sh.worksheet("授業ログ統合")
     
-    worksheet.append_rows(rows, value_input_option="RAW")
+    processed_rows = []
+    ai_tasks_info = [] # AIに裏で渡すための情報を貯めておく箱
+    
+    for row in rows:
+        while len(row) < 24:
+            row.append("")
+            
+        # 🌟 1. まずは「考え中...」という仮の文字を入れておく（爆速化）
+        row.extend(["🔄 AIが考え中...", "-"])
+        processed_rows.append(row)
+        
+        # AI用の情報を抽出
+        name = str(row[2])
+        subject = str(row[3])
+        assigned_p = str(row[13])
+        completed_p = str(row[14])
+        hw_status = f"出した宿題: {assigned_p}P, やった宿題: {completed_p}P"
+        advice = str(row[10])
+        parent_msg = str(row[11])
+        next_handover = str(row[12])
+        report_text = f"【指導アドバイス】{advice} 【保護者連絡】{parent_msg} 【次回引継ぎ】{next_handover}"
+        concentration = str(row[21])
+        
+        ai_tasks_info.append((name, subject, hw_status, concentration, report_text))
+    
+    # 🌟 2. 待たせずに一気にスプレッドシートへ保存！（ここで画面の待ち時間は終了）
+    res = worksheet.append_rows(processed_rows, value_input_option="RAW")
+    
+    # 🌟 3. 追加された「行番号」をシステムから取得して、裏側にパスを出す
+    updated_range = res.get('updates', {}).get('updatedRange', '')
+    match = re.search(r'[A-Z]+(\d+)', updated_range) # 「A42:Z43」みたいな文字から最初の行数(42)だけ抜き出す
+        
+    if match:
+        start_row = int(match.group(1))
+        
+        # 各行ごとに、裏側でAI担当スタッフ（別スレッド）を走らせる
+        for i, info in enumerate(ai_tasks_info):
+            current_row_index = start_row + i
+            t = threading.Thread(
+                target=background_ai_task,
+                args=(SPREADSHEET_ID, "授業ログ統合", current_row_index, *info)
+            )
+            t.start() # バックグラウンド処理スタート！
+            
     return True
 
 def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_records, date, teacher_name="未入力", class_type="1:1", attendance="出席（通常）", class_slot="-", advice="-", parent_msg="-", next_handover="-", assigned_p=0, completed_p=0, motivation_rank=0, hw_reason="", hw_fix="", next_hw_text="-", next_hw_pages=0, late_time="-", concentration="-", reaction="-", next_bring=""):
@@ -666,34 +734,36 @@ def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_r
     
     date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
 
+    # 🌟 1. まずは「考え中...」という仮の文字を入れておく（爆速化）
     row_data = [
-        date_str,          # 0: 日時
-        student_id,        # 1: 生徒ID
-        name,              # 2: 名前
-        subject,           # 3: 科目
-        text_name,         # 4: テキスト
-        advanced_p,        # 5: 終了ページ
-        teacher_name,      # 6: 担当講師 (ここから左に3列詰めました)
-        class_type,        # 7: 授業形態
-        attendance,        # 8: 出欠
-        class_slot,        # 9: 授業コマ
-        advice,            # 10: アドバイス
-        parent_msg,        # 11: 保護者への連絡
-        next_handover,     # 12: 次回への引継ぎ
-        assigned_p,        # 13: 出した宿題P
-        completed_p,       # 14: やった宿題P
-        motivation_rank,   # 15: やる気ランク
-        hw_reason,         # 16: 未達成の理由
-        hw_fix,            # 17: 本日の修正策
-        next_hw_text,      # 18: 次回の宿題テキスト
-        next_hw_pages,     # 19: 次回の宿題ページ数
-        late_time,         # 20: 遅刻時間
-        concentration,     # 21: 集中力
-        reaction,          # 22: ミスへの反応
-        next_bring         # 23: 次回の持ち物
+        date_str, student_id, name, subject, text_name, advanced_p, teacher_name, 
+        class_type, attendance, class_slot, advice, parent_msg, next_handover, 
+        assigned_p, completed_p, motivation_rank, hw_reason, hw_fix, next_hw_text, 
+        next_hw_pages, late_time, concentration, reaction, next_bring,
+        "🔄 AIが考え中...",  # 🌟 24: (Y列) 仮コメント
+        "-"                 # 🌟 25: (Z列) 仮スコア
     ]
     
-    worksheet.append_row(row_data, value_input_option="RAW")
+    # 🌟 2. 待たずにスプレッドシートへ保存！（画面の待ち時間は終了）
+    res = worksheet.append_row(row_data, value_input_option="RAW")
+    
+    # 🌟 3. 追加された行番号を取得して、裏のAI担当スタッフにパスを出す
+    updated_range = res.get('updates', {}).get('updatedRange', '')
+    match = re.search(r'[A-Z]+(\d+)', updated_range)
+    
+    if match:
+        row_index = match.group(1)
+        
+        hw_status = f"出した宿題: {assigned_p}P, やった宿題: {completed_p}P"
+        report_text = f"【指導アドバイス】{advice}  【保護者連絡】{parent_msg}  【次回引継ぎ】{next_handover}"
+        
+        # バックグラウンド処理スタート！
+        t = threading.Thread(
+            target=background_ai_task,
+            args=(SPREADSHEET_ID, "授業ログ統合", row_index, name, subject, hw_status, concentration, report_text)
+        )
+        t.start()
+        
     return True
 
 def get_last_handover(name, subject):
