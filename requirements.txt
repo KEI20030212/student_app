@@ -9,3 +9,4 @@ reportlab
 pypdf
 plotly
 google-api-python-client
+google-generativeai
