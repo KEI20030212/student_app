@@ -655,45 +655,66 @@ def background_ai_tasks_bulk(spreadsheet_id, sheet_name, start_row, ai_tasks_inf
         for i, info in enumerate(ai_tasks_info):
             current_row_index = start_row + i
             
-            # AIを呼び出してスコアとコメントを作成
-            ai_score, ai_comment = generate_ai_feedback(
-                student_name=info[0],
-                subject=info[1],
-                homework_status=info[2],
-                concentration=info[3],
-                report_text=info[4]
-            )
+            ai_score, ai_comment = "B", ""
+            
+            # 🌟 新機能：怒られたら最大3回まで「待ってやり直す」シンプルループ！
+            for attempt in range(3):
+                # AIにスコアとコメントを作ってもらう
+                ai_score, ai_comment = generate_ai_feedback(
+                    student_name=info[0],
+                    subject=info[1],
+                    homework_status=info[2],
+                    concentration=info[3],
+                    report_text=info[4]
+                )
 
-            # 1件ずつスプレッドシートを更新
+                # もし「スピード違反（429）」や「制限到達（quota）」で怒られていたら...
+                if "429" in ai_comment or "quota" in ai_comment.lower():
+                    print(f"⚠️ Googleの速度制限に到達。50秒待機して再トライします... (試行 {attempt+1}/3)")
+                    time.sleep(50)  # 50秒間じっと待機する
+                    continue        # もう一回、同じ生徒の処理をやり直す
+                else:
+                    break           # 成功したら、やり直しループを抜ける！
+
+            # 1件ずつスプレッドシートを更新（綺麗な状態のものを書き込む）
             worksheet.update(
                 values=[[ai_comment, ai_score]],
                 range_name=f"Y{current_row_index}:Z{current_row_index}"
             )
             
-            # 🌟 超重要：Googleに怒られないよう、次の処理の前に「3秒休憩」する！
-            time.sleep(3)
+            # 普段の休憩時間は1秒（爆速！）
+            time.sleep(4)
             
     except Exception as e:
         print(f"バックグラウンドバルク更新エラー: {e}")
 
 def background_ai_task(spreadsheet_id, sheet_name, row_index, student_name, subject, homework_status, concentration, report_text):
     from utils.ai_feedback import generate_ai_feedback
-    # AIを呼び出してスコアとコメントを自動作成
-    ai_score, ai_comment = generate_ai_feedback(
-        student_name=student_name,
-        subject=subject,
-        homework_status=homework_status,
-        concentration=concentration,
-        report_text=report_text
-    )
+    
+    ai_score, ai_comment = "B", ""
+    
+    # 🌟 単発保存の場合も、最大3回まで「待ってやり直す」ループを追加！
+    for attempt in range(3):
+        ai_score, ai_comment = generate_ai_feedback(
+            student_name=student_name,
+            subject=subject,
+            homework_status=homework_status,
+            concentration=concentration,
+            report_text=report_text
+        )
+        
+        if "429" in ai_comment or "quota" in ai_comment.lower():
+            print(f"⚠️ Googleの速度制限に到達。35秒待機して再トライします... (試行 {attempt+1}/3)")
+            time.sleep(35)
+            continue
+        else:
+            break
 
     try:
-        # スプレッドシートをこっそり再度開いて、仮文字を上書きする
         gc = get_gc_client()
         sh = gc.open_by_key(spreadsheet_id)
         worksheet = sh.worksheet(sheet_name)
         
-        # Y列（25番目）、Z列（26番目）をピンポイントで上書き更新！
         worksheet.update(
             values=[[ai_comment, ai_score]],
             range_name=f"Y{row_index}:Z{row_index}"
@@ -742,7 +763,7 @@ def save_logs_to_spreadsheet(rows):
     
     # 🌟 3. 追加された「行番号」をシステムから取得して、裏側にパスを出す
     updated_range = res.get('updates', {}).get('updatedRange', '')
-    match = re.search(r'[A-Z]+(\d+)', updated_range) # 「A42:Z43」みたいな文字から最初の行数(42)だけ抜き出す
+    match = re.search(r'[A-Z]+(\d+)', updated_range) 
         
     if match:
         start_row = int(match.group(1))
