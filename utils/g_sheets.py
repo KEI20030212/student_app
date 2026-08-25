@@ -1805,50 +1805,40 @@ def update_school_homework_detail(row_idx, subject, task, deadline, memo):
         return False
 
 #search_page.py
-def delete_specific_log(student_id, student_name, date_str, period):
+def delete_specific_log(student_id, student_name, date_str, period, advice_text=""):
     """
-    「授業ログ統合」シートから、指定した生徒・日付・授業コマの記録を探して削除する関数
+    特定の授業ログを削除する。
+    アドバイスの文章(advice_text)も条件に加えて、「確実に指定された行」だけを狙い撃ちで消す。
     """
     gc = get_gc_client()
-    try:
-        sh = gc.open_by_key(SPREADSHEET_ID)
-        ws = sh.worksheet("授業ログ統合")
-        
-        all_data = ws.get_all_values()
-        if len(all_data) <= 1:
-            return False
-            
-        header = all_data[0]
-        
-        # 各列のインデックスを取得
-        try:
-            id_idx = header.index("生徒ID") if "生徒ID" in header else -1
-            name_idx = header.index("名前") if "名前" in header else header.index("生徒名")
-            date_idx = header.index("日時")
-            period_idx = header.index("授業コマ") # 🌟 「科目」ではなく「授業コマ」を探す
-        except ValueError:
-            return False
-
-        # 下の行（最新）から順番に探す
-        for i in range(len(all_data) - 1, 0, -1):
-            row = all_data[i]
-            
-            row_date = str(row[date_idx]).replace("-", "/")
-            target_date = date_str.replace("-", "/")
-            
-            # 日付と授業コマが一致するかチェック！
-            if target_date in row_date and row[period_idx] == period:
-                if id_idx != -1 and str(row[id_idx]) == str(student_id):
-                    ws.delete_rows(i + 1)
-                    return True
-                elif row[name_idx] == student_name:
-                    ws.delete_rows(i + 1)
-                    return True
-                    
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    worksheet = sh.worksheet("授業ログ統合")
+    
+    all_values = worksheet.get_all_values()
+    if len(all_values) <= 1:
         return False
-    except Exception as e:
-        print(f"削除エラー: {e}")
-        return False
+        
+    # 下から順番に検索していく
+    for i in range(len(all_values) - 1, 0, -1):
+        row = all_values[i]
+        
+        # 安全のための長さチェック（11列目までデータがない行は無視）
+        if len(row) < 11:
+            continue
+            
+        r_date = str(row[0])
+        r_id = str(row[1])
+        r_period = str(row[9])
+        r_advice = str(row[10]) # 11列目がアドバイス
+        
+        # 日付、ID、コマが一致するかチェック
+        if date_str in r_date and r_id == str(student_id) and r_period == period:
+            # さらに「アドバイス内容」も一致するかチェック（これで双子を見分ける！）
+            if advice_text == "" or advice_text == r_advice:
+                worksheet.delete_rows(i + 1)
+                return True
+                
+    return False
 
 #message_sender.py
 def save_message(sender_id, receiver_id, message):
