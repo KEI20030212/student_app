@@ -643,6 +643,7 @@ def get_all_teacher_names():
     # 🌟 リストの原本を保護するため、list() でコピーして返す（Mutation Error対策）
     return list(lst)
 
+AI_API_LOCK = threading.Lock()
 def background_ai_tasks_bulk(spreadsheet_id, sheet_name, start_row, ai_tasks_info):
     from utils.ai_feedback import generate_ai_feedback
     
@@ -651,39 +652,36 @@ def background_ai_tasks_bulk(spreadsheet_id, sheet_name, start_row, ai_tasks_inf
         sh = gc.open_by_key(spreadsheet_id)
         worksheet = sh.worksheet(sheet_name)
         
-        # リスト（名簿）を上から順番に1件ずつ処理していく
         for i, info in enumerate(ai_tasks_info):
             current_row_index = start_row + i
-            
             ai_score, ai_comment = "B", ""
             
-            # 🌟 新機能：怒られたら最大3回まで「待ってやり直す」シンプルループ！
-            for attempt in range(3):
-                # AIにスコアとコメントを作ってもらう
-                ai_score, ai_comment = generate_ai_feedback(
-                    student_name=info[0],
-                    subject=info[1],
-                    homework_status=info[2],
-                    concentration=info[3],
-                    report_text=info[4]
-                )
+            for attempt in range(5):
+                # 🌟 変更：マイク（信号機）が空くまで待ち、絶対に1人ずつ通信する！
+                with AI_API_LOCK:
+                    ai_score, ai_comment = generate_ai_feedback(
+                        student_name=info[0], subject=info[1], homework_status=info[2],
+                        concentration=info[3], report_text=info[4]
+                    )
+                    # 通信が終わったら、マイクを持ったまま「確実に4秒」待機して次の人をブロックする
+                    time.sleep(4)
 
-                # もし「スピード違反（429）」や「制限到達（quota）」で怒られていたら...
                 if "429" in ai_comment or "quota" in ai_comment.lower():
-                    print(f"⚠️ Googleの速度制限に到達。50秒待機して再トライします... (試行 {attempt+1}/3)")
-                    time.sleep(50)  # 50秒間じっと待機する
-                    continue        # もう一回、同じ生徒の処理をやり直す
+                    wait_time = 45 + random.randint(1, 25)
+                    print(f"⚠️ 制限到達。{wait_time}秒待機して再トライします... (試行 {attempt+1}/5)")
+                    time.sleep(wait_time) 
+                    continue
                 else:
-                    break           # 成功したら、やり直しループを抜ける！
+                    break  
 
-            # 1件ずつスプレッドシートを更新（綺麗な状態のものを書き込む）
+            # スプレッドシートを更新
             worksheet.update(
                 values=[[ai_comment, ai_score]],
                 range_name=f"Y{current_row_index}:Z{current_row_index}"
             )
             
-            # 普段の休憩時間は1秒（爆速！）
-            time.sleep(4)
+            # スプレッドシート側の通信エラー防止用に1秒だけ待つ
+            time.sleep(1)
             
     except Exception as e:
         print(f"バックグラウンドバルク更新エラー: {e}")
@@ -693,19 +691,20 @@ def background_ai_task(spreadsheet_id, sheet_name, row_index, student_name, subj
     
     ai_score, ai_comment = "B", ""
     
-    # 🌟 単発保存の場合も、最大3回まで「待ってやり直す」ループを追加！
-    for attempt in range(3):
-        ai_score, ai_comment = generate_ai_feedback(
-            student_name=student_name,
-            subject=subject,
-            homework_status=homework_status,
-            concentration=concentration,
-            report_text=report_text
-        )
+    for attempt in range(5):
+        # 🌟 単発保存の場合も、同じマイク（信号機）を使って絶対に順番待ちをする！
+        with AI_API_LOCK:
+            ai_score, ai_comment = generate_ai_feedback(
+                student_name=student_name, subject=subject, homework_status=homework_status,
+                concentration=concentration, report_text=report_text
+            )
+            # 確実な4秒間の待機（この間、他の保存処理は裏でピタッと待たされます）
+            time.sleep(4)
         
         if "429" in ai_comment or "quota" in ai_comment.lower():
-            print(f"⚠️ Googleの速度制限に到達。35秒待機して再トライします... (試行 {attempt+1}/3)")
-            time.sleep(35)
+            wait_time = 45 + random.randint(1, 25)
+            print(f"⚠️ 制限到達。{wait_time}秒待機して再トライします... (試行 {attempt+1}/5)")
+            time.sleep(wait_time)
             continue
         else:
             break
@@ -723,9 +722,6 @@ def background_ai_task(spreadsheet_id, sheet_name, row_index, student_name, subj
         print(f"バックグラウンドAI更新エラー: {e}")
 
 def save_logs_to_spreadsheet(rows):
-    """
-    【バルク対応】授業ログ統合シートに複数行の記録をまとめて一括保存する関数
-    """
     if not rows:
         return True
         
@@ -734,17 +730,15 @@ def save_logs_to_spreadsheet(rows):
     worksheet = sh.worksheet("授業ログ統合")
     
     processed_rows = []
-    ai_tasks_info = [] # AIに裏で渡すための情報を貯めておく箱
+    ai_tasks_info = [] 
     
     for row in rows:
         while len(row) < 24:
             row.append("")
             
-        # 🌟 1. まずは「考え中...」という仮の文字を入れておく（爆速化）
         row.extend(["🔄 AIが考え中...", "-"])
         processed_rows.append(row)
         
-        # AI用の情報を抽出
         name = str(row[2])
         subject = str(row[3])
         assigned_p = str(row[13])
@@ -758,10 +752,8 @@ def save_logs_to_spreadsheet(rows):
         
         ai_tasks_info.append((name, subject, hw_status, concentration, report_text))
     
-    # 🌟 2. 待たせずに一気にスプレッドシートへ保存！（ここで画面の待ち時間は終了）
     res = worksheet.append_rows(processed_rows, value_input_option="RAW")
     
-    # 🌟 3. 追加された「行番号」をシステムから取得して、裏側にパスを出す
     updated_range = res.get('updates', {}).get('updatedRange', '')
     match = re.search(r'[A-Z]+(\d+)', updated_range) 
         
@@ -772,7 +764,7 @@ def save_logs_to_spreadsheet(rows):
             target=background_ai_tasks_bulk,
             args=(SPREADSHEET_ID, "授業ログ統合", start_row, ai_tasks_info)
         )
-        t.start() # バックグラウンド処理スタート！
+        t.start() 
             
     return True
 
@@ -785,20 +777,17 @@ def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_r
     
     date_str = date.strftime("%Y/%m/%d") if hasattr(date, 'strftime') else str(date)
 
-    # 🌟 1. まずは「考え中...」という仮の文字を入れておく（爆速化）
     row_data = [
         date_str, student_id, name, subject, text_name, advanced_p, teacher_name, 
         class_type, attendance, class_slot, advice, parent_msg, next_handover, 
         assigned_p, completed_p, motivation_rank, hw_reason, hw_fix, next_hw_text, 
         next_hw_pages, late_time, concentration, reaction, next_bring,
-        "🔄 AIが考え中...",  # 🌟 24: (Y列) 仮コメント
-        "-"                 # 🌟 25: (Z列) 仮スコア
+        "🔄 AIが考え中...",  
+        "-"                 
     ]
     
-    # 🌟 2. 待たずにスプレッドシートへ保存！（画面の待ち時間は終了）
     res = worksheet.append_row(row_data, value_input_option="RAW")
     
-    # 🌟 3. 追加された行番号を取得して、裏のAI担当スタッフにパスを出す
     updated_range = res.get('updates', {}).get('updatedRange', '')
     match = re.search(r'[A-Z]+(\d+)', updated_range)
     
@@ -808,7 +797,6 @@ def save_to_spreadsheet(student_id, name, subject, text_name, advanced_p, quiz_r
         hw_status = f"出した宿題: {assigned_p}P, やった宿題: {completed_p}P"
         report_text = f"【指導アドバイス】{advice}  【保護者連絡】{parent_msg}  【次回引継ぎ】{next_handover}"
         
-        # バックグラウンド処理スタート！
         t = threading.Thread(
             target=background_ai_task,
             args=(SPREADSHEET_ID, "授業ログ統合", row_index, name, subject, hw_status, concentration, report_text)
