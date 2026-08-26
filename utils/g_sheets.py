@@ -12,6 +12,7 @@ import base64
 import pickle
 import altair as alt # 座標グラフを描くための魔法の絵の具
 import threading
+import random
 
 def get_jst_now():
     """現在時刻を日本時間(JST)で取得する"""
