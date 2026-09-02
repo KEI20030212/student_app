@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import streamlit.components.v1 as components
+import io  # 🌟 NEW: Excelファイルをメモリ上で作るための部品
+import re  # 🌟 NEW: ファイル名を安全にするための部品
 
 # 🌟 APIガードをインポート
 from utils.api_guard import robust_api_call
@@ -80,9 +82,6 @@ def cached_calculate_attendance_rate(student_id, student_name):
     rate = (attend_count / total_lessons) * 100
     return f"{int(rate)}%"
 
-# ==========================================
-# 🌟 追加：宿題履行率をログから自動計算する関数
-# ==========================================
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_calculate_homework_rate(student_id, student_name):
     from utils.g_sheets import get_all_logs
@@ -108,19 +107,17 @@ def cached_calculate_homework_rate(student_id, student_name):
     if '出した宿題P' not in df_student.columns or 'やった宿題P' not in df_student.columns:
         return "データなし"
 
-    # 数値化して欠損値を0にする
     assigned = pd.to_numeric(df_student['出した宿題P'], errors='coerce').fillna(0)
     done = pd.to_numeric(df_student['やった宿題P'], errors='coerce').fillna(0)
     
     total_assigned = assigned.sum()
     total_done = done.sum()
     
-    # 宿題がまだ一度も出されていない場合は100%（警告回避）とする
     if total_assigned == 0:
         return "100% (宿題なし)"
         
     rate = (total_done / total_assigned) * 100
-    rate = min(rate, 100.0) # 余分にやった場合でも上限100%にする
+    rate = min(rate, 100.0) 
     
     return f"{int(rate)}%"
 
@@ -197,12 +194,10 @@ def render_conference_report(selected_student_option, info):
     st.subheader("🔥 学習への取り組み姿勢")
     col1, col2, col3, col4 = st.columns(4)
     
-    # 🌟 変更：マスタの数字ではなく、ログから宿題履行率を自動計算して取得！
     with st.spinner("出席率・宿題進捗を計算中..."):
         attendance_rate = cached_calculate_attendance_rate(student_id, student_name)
         hw_rate_str = cached_calculate_homework_rate(student_id, student_name)
     
-    # "85%" などの文字列から数字だけを取り出して評価メッセージ用に使う
     try:
         hw_rate = float(hw_rate_str.replace('%', '').split()[0])
     except Exception:
@@ -294,7 +289,7 @@ def render_conference_report(selected_student_option, info):
     st.divider()
 
     # ==========================================
-    # 3. 小テスト進捗の一覧
+    # 3. 小テスト進捗の一覧 ＆ カラーマップ
     # ==========================================
     st.subheader("📊 小テスト（基礎学力）の定着状況")
     
@@ -332,7 +327,6 @@ def render_conference_report(selected_student_option, info):
             
         if summary_data:
             df_summary = pd.DataFrame(summary_data)
-            
             dynamic_height = max(200, len(df_summary) * 40)
             
             bar_chart = alt.Chart(df_summary).mark_bar().encode(
@@ -343,12 +337,140 @@ def render_conference_report(selected_student_option, info):
             ).properties(height=dynamic_height) 
             
             st.altair_chart(bar_chart, use_container_width=True)
-            
-            st.table(df_summary.set_index("テキスト名"))
         else:
             st.info("集計できる小テストデータがありません。")
     else:
         st.info("小テストのデータがまだありません。")
+
+    # ==========================================
+    # 🌟 NEW: 学年横断カラーマップ（ヒートマップ） - 完全版
+    # ==========================================
+    st.write("---")
+    st.markdown("#### 🗺️ 学年横断カラーマップ（弱点分析ヒートマップ）")
+    st.write("積み上げ科目の弱点分析に最適です。横並びで定着度を比較できます。")
+    st.caption("🟩 80%以上 (合格) / 🟨 60~79% (要復習) / 🟥 60%未満 (苦手) / ⬜ 未実施")
+
+    available_texts = set()
+    if master_dict: available_texts.update(master_dict.keys())
+    if not df_quiz.empty and 'テキスト' in df_quiz.columns:
+        available_texts.update(df_quiz['テキスト'].dropna().unique())
+        
+    all_texts_options = ["未選択"] + sorted(list(available_texts))
+
+    num_texts = st.selectbox("比較するテキストの数を選択", [1, 2, 3, 4, 5], index=2)
+    
+    cols = st.columns(num_texts)
+    selected_texts_raw = []
+    
+    for i in range(num_texts):
+        with cols[i]:
+            t_val = st.selectbox(f"比較テキスト {i+1}", all_texts_options, key=f"cm_t{i}")
+            selected_texts_raw.append(t_val)
+
+    selected_texts = []
+    for t in selected_texts_raw:
+        if t != "未選択" and t not in selected_texts:
+            selected_texts.append(t)
+
+    if selected_texts:
+        max_chaps = 0
+        text_chap_maps = {}
+        for t in selected_texts:
+            chaps = master_dict.get(t, {})
+            text_chap_maps[t] = chaps
+            if chaps:
+                int_keys = [int(k) for k in chaps.keys() if str(k).isdigit()]
+                if int_keys: max_chaps = max(max_chaps, max(int_keys))
+            else:
+                if not df_quiz.empty:
+                    quiz_chaps = df_quiz[df_quiz['テキスト'] == t]['単元'].dropna().astype(str)
+                    int_quiz_chaps = [int(k) for k in quiz_chaps if k.isdigit()]
+                    if int_quiz_chaps: max_chaps = max(max_chaps, max(int_quiz_chaps))
+        
+        if max_chaps == 0: max_chaps = 15
+
+        map_data = []
+        style_data = []
+        
+        for i in range(1, max_chaps + 1):
+            row = {"縦軸(章)": f"第{i}章"}
+            style_row = {"縦軸(章)": "font-weight: bold; background-color: #f0f2f6; text-align: center;"}
+            
+            for t in selected_texts:
+                chap_name = text_chap_maps[t].get(str(i), "-")
+                score_disp = "-"
+                cell_style = "" 
+                
+                if not df_quiz.empty:
+                    df_target = df_quiz[(df_quiz['テキスト'] == t) & (df_quiz['単元'].astype(str) == str(i))]
+                    df_target = df_target.dropna(subset=['正答率'])
+                    
+                    if not df_target.empty:
+                        idx_max = df_target['正答率'].idxmax()
+                        best_ratio = df_target.loc[idx_max, '正答率']
+                        best_score_raw = df_target.loc[idx_max, '点数']
+                        
+                        try:
+                            score_val = int(float(best_score_raw))
+                        except:
+                            score_val = best_score_raw
+                            
+                        score_disp = f"{score_val}"
+                        
+                        if best_ratio >= 0.8:
+                            cell_style = "background-color: #c6efce; color: #006100; font-weight: bold; text-align: center;" 
+                        elif best_ratio >= 0.6:
+                            cell_style = "background-color: #ffeb9c; color: #9c5700; font-weight: bold; text-align: center;" 
+                        else:
+                            cell_style = "background-color: #ffc7ce; color: #9c0006; font-weight: bold; text-align: center;" 
+
+                row[f"{t} (単元名)"] = chap_name
+                row[f"点数 ({t})"] = score_disp
+                
+                style_row[f"{t} (単元名)"] = ""
+                style_row[f"点数 ({t})"] = cell_style
+                
+            map_data.append(row)
+            style_data.append(style_row)
+
+        df_map = pd.DataFrame(map_data)
+        df_style = pd.DataFrame(style_data)
+        
+        styler = df_map.style.apply(lambda _: df_style, axis=None)
+        
+        st.dataframe(styler, use_container_width=True, hide_index=True)
+        
+        st.write("") 
+        col_dl, col_blank = st.columns([1, 2])
+        with col_dl:
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                styler.to_excel(writer, index=False, sheet_name='弱点分析マップ')
+            
+            excel_data = excel_buffer.getvalue()
+            
+            # 🌟 変更: ファイル名を動的にカスタマイズ！
+            # 選択されたテキスト名をアンダーバーで繋ぐ
+            texts_joined = "_".join(selected_texts)
+            # ファイル名に使えない記号（/や\など）を安全のため全角に変換するか削除する
+            texts_for_filename = re.sub(r'[\\/:*?"<>|]', ' ', texts_joined)
+            
+            # 生徒ID_生徒名_選択テキスト_カラーマップ.xlsx という美しい名前に！
+            dynamic_file_name = f"{student_id}_{student_name}_{texts_for_filename}_カラーマップ.xlsx"
+            
+            st.download_button(
+                label="📥 この表をExcel形式（色付き）でダウンロード",
+                data=excel_data,
+                file_name=dynamic_file_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True
+            )
+            
+    else:
+        st.info("👆 上のドロップダウンから、比較したいテキストを選択してください。")
+
+    st.divider()
 
     # ==========================================
     # 4. 弱点分析
