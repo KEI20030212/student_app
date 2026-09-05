@@ -94,7 +94,8 @@ def render_student_portal_page():
                         
                         new_name = st.text_input("生徒名（必須）", placeholder="例: 山田 太郎")
                         new_grade = st.text_input("学年", placeholder="例: 中3 / 高1")
-                        
+                        new_parent_email = st.text_input("✉️ 保護者メールアドレス", placeholder="例: sample@example.com (※後からでも入力可能)")
+
                         c_ex1, c_ex2 = st.columns(2)
                         exam_opts = ["", "受験生"]
                         new_exam = c_ex1.selectbox("🔥 受験区分", exam_opts, index=0)
@@ -150,7 +151,8 @@ def render_student_portal_page():
                                 exam_status=new_exam,
                                 school_type=new_school_type,
                                 contract_course=new_contract_str,
-                                student_type=new_type_str
+                                student_type=new_type_str,
+                                parent_email=new_parent_email.strip()
                             )
                             return True
                         

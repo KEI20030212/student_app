@@ -78,6 +78,9 @@ def render_student_details_page(selected_student_option):
             st.markdown(f"**📚 受講科目**: {info.get('受講科目', '') or '未設定'}")
             st.markdown(f"**📋 契約コース**: {info.get('契約コース', '') or '未設定'}")
             
+            disp_email = info.get('保護者メールアドレス', '')
+            st.markdown(f"**✉️ 保護者メール**: {disp_email or '未設定'}")
+
             if disp_types:
                 st.markdown(f"**🎯 生徒タイプ**: {disp_types.replace('、', ' / ')}")
                 
@@ -113,6 +116,8 @@ def render_student_details_page(selected_student_option):
                         new_target = st.text_input("志望校・通塾目的", value=info.get('志望校・目的', ''))
                         new_subjects = st.text_input("受講科目 (例: 英語, 数学)", value=info.get('受講科目', ''))
                         
+                        new_parent_email = st.text_input("✉️ 保護者メールアドレス", value=info.get('保護者メールアドレス', ''))
+
                         st.markdown("##### 📋 契約コース (回数/月)")
                         raw_course = str(info.get('契約コース', ''))
                         
@@ -159,7 +164,8 @@ def render_student_details_page(selected_student_option):
                                         new_exam,        
                                         new_school_type,
                                         new_contract_str,
-                                        new_type_str
+                                        new_type_str,
+                                        parent_email=new_parent_email.strip()
                                     )
                                     return True
                                 
