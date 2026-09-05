@@ -301,7 +301,7 @@ def save_seating_data(seating_dict):
     for row in data_to_append:
         ws.append_row(row)
 
-def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定", contract_course="", student_type=""):
+def update_student_info(student_id, name, grade, school, target, subjects, ability, motivation, naishin, dev_score, hw_rate, exam_status="未設定", school_type="未設定", contract_course="", student_type="", parent_email=""):
     
     gc = get_gc_client() 
     sh = gc.open_by_key(SPREADSHEET_ID)
@@ -311,7 +311,7 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
     header = all_data[0]
     
     # 🌟 変更：契約コースの列がなければ自動で作るように追加
-    required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分', '契約コース', 'タイプ']
+    required_cols = ['内申点', '最新偏差値', '宿題履行率', '受験区分', '学校区分', '契約コース', 'タイプ', '保護者メールアドレス']
     for col in required_cols:
         if col not in header:
             ws.update_cell(1, len(header) + 1, col)
@@ -341,7 +341,8 @@ def update_student_info(student_id, name, grade, school, target, subjects, abili
         '受験区分': exam_status,
         '学校区分': school_type,
         '契約コース': contract_course,
-        'タイプ': student_type
+        'タイプ': student_type,
+        '保護者メールアドレス': parent_email
     }
 
     # 🌟 改善ポイント2: 辞書にない列（保護者の電話番号など）は既存データをそのまま残す
