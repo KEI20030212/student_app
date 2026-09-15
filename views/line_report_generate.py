@@ -6,7 +6,8 @@ from utils.g_sheets import (
     load_quiz_records, 
     load_school_homework_data,
     get_sent_list,      
-    update_sent_flag
+    update_sent_flag,
+    get_quiz_master_dict
 )
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
@@ -18,9 +19,11 @@ def cached_get_all_logs():
 def cached_load_quiz_records():
     return robust_api_call(load_quiz_records, fallback_value=pd.DataFrame())
 
-@st.cache_data(ttl=60, show_spinner=False)
 def cached_load_hw_records():
     return robust_api_call(load_school_homework_data, fallback_value=pd.DataFrame())
+
+def cached_get_quiz_master():
+    return robust_api_call(get_quiz_master_dict, fallback_value={})
 
 # --- メイン描画関数 ---
 def render_report_generation_tab(can_use_report):
@@ -35,6 +38,7 @@ def render_report_generation_tab(can_use_report):
         df_all_logs = cached_get_all_logs()
         df_all_quizzes = cached_load_quiz_records()
         df_hw = cached_load_hw_records() # ※現状未使用ですが将来の拡張用に保持
+        quiz_master = cached_get_quiz_master()
 
         if df_all_logs.empty or "APIエラー発生" in df_all_logs.columns:
             st.error("授業記録データの取得に失敗しました。")
@@ -165,7 +169,40 @@ def render_report_generation_tab(can_use_report):
                     df_all_quizzes['日時'] = pd.to_datetime(df_all_quizzes['日時'], format='mixed', errors='coerce')
                     student_quizzes = df_all_quizzes[(df_all_quizzes['名前'] == student_name) & (df_all_quizzes['日時'].dt.date == target_date)]
                     if not student_quizzes.empty:
-                        quiz_results_list = [f"【{row.get('テキスト', '不明')} {row.get('単元', '不明')}】: {row.get('点数', '不明')}点" for _, row in student_quizzes.iterrows()]
+                        quiz_results_list = []
+                        for _, row in student_quizzes.iterrows():
+                            t_name_raw = row.get('テキスト', '不明')
+                            chap_raw = row.get('単元', '不明')
+                            score = row.get('点数', '不明')
+                            
+                            # 余計な空白を消して綺麗にする
+                            t_name = str(t_name_raw).strip()
+                            
+                            # 単元名も「1.0」のようにならないように綺麗にする
+                            try:
+                                chap = str(int(float(chap_raw)))
+                            except Exception:
+                                chap = str(chap_raw).strip()
+                                if chap.endswith('.0'):
+                                    chap = chap[:-2]
+                            
+                            # 🌟 【ここが賢いポイント！】辞書の中を「テキスト名」で検索する！
+                            full_marks = 100 # 見つからなかった場合のデフォルト点数
+                            
+                            # quiz_master（マスター辞書）の中を一つずつ確認する
+                            for key_in_dict, data_in_dict in quiz_master.items():
+                                # もし辞書のキー（例: "英単語_1"）の中に、テキスト名（例: "英単語"）が含まれていたら
+                                if t_name in key_in_dict:
+                                    # その満点を取得して、探すのをやめる！
+                                    full_marks = data_in_dict.get("full_marks", 100)
+                                    break 
+                            
+                            # 16.0 などの表示を防ぐため、整数の場合はint型（16）に変換
+                            if isinstance(full_marks, float) and full_marks.is_integer():
+                                full_marks = int(full_marks)
+                                
+                            # リストに「〇〇/〇〇点」の形式で追加！
+                            quiz_results_list.append(f"【{t_name} {chap}】: {score}/{full_marks}点")
                         folder_id = robust_api_call(get_or_create_student_folder, student_id, student_name, fallback_value=None)
                         if folder_id:
                             drive_url_line = f"📂 【本日の答案確認URL】\nhttps://drive.google.com/drive/folders/{folder_id}\n\n"
