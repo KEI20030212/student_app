@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re  
+import altair as alt
 from utils.g_sheets import get_all_logs, load_quiz_records, load_parent_reply_data
 from utils.api_guard import robust_api_call
 
@@ -35,7 +36,7 @@ def render_analytics_dashboard_page():
             st.cache_data.clear()
             st.rerun()            
 
-    st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」「小テスト実施率」「保護者ファン化度」を可視化します。")
+    st.write("講師の「稼働状況」「指導の熱量」「宿題コントロール力」「小テスト実施率」「保護者ファン化度」に加え、**「AIによるレポート品質評価」**を可視化します。")
 
     report_col = 'アドバイス'
     hw_content_col = '次回の宿題ページ数'
@@ -64,6 +65,17 @@ def render_analytics_dashboard_page():
     df_all = df_all.dropna(subset=['日時'])
     df_all['日付'] = df_all['日時'].dt.date 
     df_all['年月'] = df_all['日時'].dt.strftime("%Y年%m月")
+
+    # ==========================================
+    # 🌟 NEW: AIフィードバック列の特定とクレンジング
+    # ==========================================
+    fb_col = 'AIフィードバック' if 'AIフィードバック' in df_all.columns else (df_all.columns[24] if len(df_all.columns) > 24 else None)
+    score_col = 'AIスコア' if 'AIスコア' in df_all.columns else (df_all.columns[25] if len(df_all.columns) > 25 else None)
+
+    if score_col:
+        df_all['クリーン_スコア'] = df_all[score_col].astype(str).str.strip().str.upper()
+        # S, A, B, C, D 以外のノイズを弾く
+        df_all['有効スコア'] = df_all['クリーン_スコア'].apply(lambda x: x if x in ['S', 'A', 'B', 'C', 'D'] else None)
 
     # --- 小テストデータの照合 ---
     if not df_quiz.empty and "APIエラー発生" not in df_quiz.columns:
@@ -114,7 +126,9 @@ def render_analytics_dashboard_page():
         if hw_status_col not in df_all.columns and 'やった宿題' in df_all.columns:
             hw_status_col = 'やった宿題'
 
-    # 画面表示
+    # ==========================================
+    # 🎨 画面描画
+    # ==========================================
     month_options = sorted(list(set(default_months + (df_all['年月'].unique().tolist() if not df_all.empty else []))), reverse=True)
     st.divider()
     selected_month = st.selectbox("📅 分析する月を選択", month_options)
@@ -129,24 +143,43 @@ def render_analytics_dashboard_page():
     selected_teacher = st.selectbox("👨‍🏫 分析する講師を選択", ["全員まとめて比較"] + teachers)
     st.divider()
 
+    # -----------------------------------------------------
+    # タブ1: 全員まとめて比較
+    # -----------------------------------------------------
     if selected_teacher == "全員まとめて比較":
         st.subheader(f"🏆 {selected_month} の全体ランキング")
-        c1, c2, c3 = st.columns(3)
+        
+        # 🌟 NEW: カラムを4つに増やし、AI高評価率を追加！
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.markdown("**📈 コマ数（授業回数）**")
             koma = df_month['担当講師'].value_counts().reset_index()
             koma.columns = ['講師名', 'コマ数']
             st.bar_chart(koma.set_index('講師名'))
+            
         with c2:
             if '報告文字数' in df_month.columns:
-                st.markdown("**🔥 アドバイスの平均文字数**")
+                st.markdown("**🔥 アドバイス平均文字数**")
                 avg_chars = df_month.groupby('担当講師')['報告文字数'].mean().reset_index()
                 st.bar_chart(avg_chars.set_index('担当講師'))
+                
         with c3:
             st.markdown("**💯 小テスト実施率 (%)**")
             quiz_rates = df_month.groupby('担当講師')['小テスト実施'].mean().reset_index()
             quiz_rates['実施率(%)'] = quiz_rates['小テスト実施'] * 100
             st.bar_chart(quiz_rates.set_index('担当講師')['実施率(%)'])
+            
+        with c4:
+            if score_col:
+                st.markdown("**🤖 AI高評価(S・A)率 (%)**")
+                df_scored = df_month.dropna(subset=['有効スコア']).copy()
+                if not df_scored.empty:
+                    df_scored['SA判定'] = df_scored['有効スコア'].apply(lambda x: 1 if x in ['S', 'A'] else 0)
+                    sa_rates = df_scored.groupby('担当講師')['SA判定'].mean().reset_index()
+                    sa_rates['S・A率(%)'] = sa_rates['SA判定'] * 100
+                    st.bar_chart(sa_rates.set_index('担当講師')['S・A率(%)'], color="#FFD700")
+                else:
+                    st.info("スコアデータなし")
             
         st.write("")
         st.markdown("### 💬 講師別：保護者のリアクション比率（ファン化度グラフ）")
@@ -156,18 +189,18 @@ def render_analytics_dashboard_page():
         
         if not df_react_only.empty:
             df_pivot = pd.crosstab(df_react_only['担当講師'], df_react_only['保護者リアクション'])
-            
             for t in teachers:
                 if t not in df_pivot.index:
                     df_pivot.loc[t] = 0
-                    
             df_pivot = df_pivot.loc[[t for t in df_pivot.index if t in teachers]]
             st.bar_chart(df_pivot, stack=True)
         else:
             st.info("💡 選択された月には、「既読スルー」以外の保護者リアクションがまだ記録されていません。")
             
+    # -----------------------------------------------------
+    # タブ2: 個別分析
+    # -----------------------------------------------------
     else:
-        # 個別分析
         st.subheader(f"👩‍🏫 {selected_teacher} 先生の分析レポート")
         df_t = df_month[df_month['担当講師'] == selected_teacher]
 
@@ -187,7 +220,7 @@ def render_analytics_dashboard_page():
 
         st.divider()
         
-        # --- 宿題コントロール力 分析 ---
+        # --- 宿題コントロール力 ---
         st.markdown(f"**📝 宿題量コントロール力（生徒のキャパシティ把握度）**")
         st.caption("※先生が出した宿題の合計ページ数に対して、生徒が実際に解いてきた合計ページ数の割合です。")
         
@@ -221,23 +254,8 @@ def render_analytics_dashboard_page():
 
         st.divider()
 
-        # --- 小テスト実施率 分析 ---
-        st.markdown(f"**💯 小テスト実施率（定着度の計測）**")
-        col_q1, col_q2, col_q3 = st.columns(3)
-        total_classes = len(df_t)
-        quiz_done_count = df_t['小テスト実施'].sum()
-        q_rate = (quiz_done_count / total_classes * 100) if total_classes > 0 else 0
-        col_q1.metric("担当コマ数", f"{total_classes} コマ")
-        col_q2.metric("小テスト実施コマ", f"{quiz_done_count} コマ")
-        col_q3.metric("実施率", f"{q_rate:.1f} %")
-        st.progress(min(q_rate / 100, 1.0))
-        if q_rate >= 80: st.success("🌟 素晴らしい！授業の定着度を毎回しっかり計測できています！")
-        elif q_rate >= 50: st.info("👍 半数以上の授業でテストを実施できています。")
-        else: st.warning("⚠️ 実施率が低めです。授業の冒頭で小テストを行い、結果を記録するルーティンを徹底しましょう。")
-
-        st.divider()
+        # --- 保護者エンゲージメント ---
         st.markdown(f"**💬 保護者ファン化度・エンゲージメント詳細**")
-        
         reply_counts = df_t['保護者リアクション'].value_counts()
         
         col_r1, col_r2 = st.columns([4, 6])
@@ -254,8 +272,69 @@ def render_analytics_dashboard_page():
                 st.info("今月はまだ保護者からのポジティブリアクションはありません。")
             
         if star_rate >= 30:
-            st.success(f"🔥 **超優秀ファンタジスタ講師！** 報告書の3割以上で保護者から大絶賛（神対応）を貰っています。保護者からの信頼が極めて厚いため、今後の提案業務などの中心人物として活躍が期待できます。")
+            st.success(f"🔥 **超優秀ファンタジスタ講師！** 報告書の3割以上で大絶賛を貰っています。")
         elif star_rate > 0 or reply_counts.get("🟢 好意的・納得（信頼構築・塾への指示通りに家庭が動く状態）", 0) > 0:
-            st.info(f"👍 **良好な信頼関係です。** 既読スルーの山の中に、しっかりと保護者からの感謝や納得のサインが隠れています。引き続き丁寧な報告を継続しましょう。")
+            st.info(f"👍 **良好な信頼関係です。** 引き続き丁寧な報告を継続しましょう。")
         else:
-            st.warning(f"⚠️ **要注意サイン:** 今月は保護者から自発的なポジティブリアクションが1件もありません（すべて自動の既読スルー扱いです）。報告書の文章が事務的になっていないか、一度内容をチェックしてみましょう。")
+            st.warning(f"⚠️ **要注意:** 今月は保護者から自発的なポジティブリアクションがありません。文章が事務的になっていないか確認しましょう。")
+
+        # ==========================================
+        # 🌟 NEW: AIフィードバック＆レポート品質分析
+        # ==========================================
+        st.divider()
+        st.markdown(f"**🤖 AIフィードバック ＆ レポート品質分析**")
+        st.caption("AIが判定した指導報告書の品質スコアと、最新のフィードバック傾向です。")
+        
+        if score_col and fb_col:
+            df_t_scored = df_t.dropna(subset=['有効スコア']).copy()
+            
+            if not df_t_scored.empty:
+                score_counts = df_t_scored['有効スコア'].value_counts()
+                total_scored = len(df_t_scored)
+                
+                s_count = score_counts.get('S', 0)
+                a_count = score_counts.get('A', 0)
+                b_count = score_counts.get('B', 0)
+                c_count = score_counts.get('C', 0) + score_counts.get('D', 0)
+                
+                sa_rate = int((s_count + a_count) / total_scored * 100)
+                
+                c_score1, c_score2 = st.columns([1, 1])
+                
+                with c_score1:
+                    st.write("📊 **AIスコア内訳**")
+                    c_s, c_a, c_b, c_c = st.columns(4)
+                    c_s.metric("🌟 S評価", f"{s_count} 件")
+                    c_a.metric("✨ A評価", f"{a_count} 件")
+                    c_b.metric("✅ B評価", f"{b_count} 件")
+                    c_c.metric("⚠️ C/D評価", f"{c_count} 件")
+                    
+                    if sa_rate >= 80:
+                        st.success(f"🌟 **高評価率 {sa_rate}%！** 非常に質の高い指導報告書が書けています。この調子で保護者との信頼を築きましょう！")
+                    elif sa_rate >= 50:
+                        st.info(f"👍 **高評価率 {sa_rate}%。** 安定したレポートが書けています。さらにS評価を増やすために、生徒の具体的な様子を盛り込んでみましょう。")
+                    elif c_count > 0:
+                        st.warning(f"⚠️ C評価以下のレポートが {c_count} 件あります。「もう少し具体的に」などのAIからのアドバイスを確認し、書き方を改善しましょう。")
+                    else:
+                        st.write(f"📝 高評価率 {sa_rate}%")
+
+                with c_score2:
+                    st.write("📩 **最新のAIからのアドバイス (直近3件)**")
+                    df_recent_fb = df_t.dropna(subset=[fb_col])
+                    df_recent_fb = df_recent_fb[df_recent_fb[fb_col].astype(str).str.strip() != ""]
+                    
+                    if not df_recent_fb.empty:
+                        df_recent_fb = df_recent_fb.sort_values(by='日時', ascending=False).head(3)
+                        for _, r in df_recent_fb.iterrows():
+                            date_str = r['日時'].strftime('%m/%d') if pd.notna(r['日時']) else ""
+                            s_name = r['生徒名'] if '生徒名' in r else "不明"
+                            sc = str(r['有効スコア']).strip() if pd.notna(r['有効スコア']) else "-"
+                            fb_text = str(r[fb_col]).strip()
+                            
+                            with st.container(border=True):
+                                st.markdown(f"**🗓 {date_str} | 👤 {s_name} | 評価: {sc}**")
+                                st.caption(fb_text)
+                    else:
+                        st.info("フィードバックデータがありません。")
+            else:
+                st.info("AIスコアの判定データがありません。")
