@@ -103,7 +103,7 @@ def render_quiz_list_page():
                 v = float(val)
                 ratio = v / full_m if full_m > 0 else 0
                 if ratio >= 1.0: return f"👑 {int(v)}"
-                elif ratio >= 0.8: return f"🟢 {int(v)}"
+                elif ratio >= 0.85: return f"🟢 {int(v)}"
                 elif ratio >= 0.2: return f"🟡 {int(v)}"
                 else: return f"🔴 {int(v)}"
             except:

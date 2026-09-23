@@ -348,7 +348,7 @@ def render_conference_report(selected_student_option, info):
     st.write("---")
     st.markdown("#### 🗺️ 学年横断カラーマップ（弱点分析ヒートマップ）")
     st.write("積み上げ科目の弱点分析に最適です。横並びで定着度を比較できます。")
-    st.caption("🟩 80%以上 (合格) / 🟨 60~79% (要復習) / 🟥 60%未満 (苦手) / ⬜ 未実施")
+    st.caption("🟩 85%以上 (合格) / 🟨 60~84% (要復習) / 🟥 60%未満 (苦手) / ⬜ 未実施")
 
     available_texts = set()
     if master_dict: available_texts.update(master_dict.keys())
@@ -417,7 +417,7 @@ def render_conference_report(selected_student_option, info):
                             
                         score_disp = f"{score_val}"
                         
-                        if best_ratio >= 0.8:
+                        if best_ratio >= 0.85:
                             cell_style = "background-color: #c6efce; color: #006100; font-weight: bold; text-align: center;" 
                         elif best_ratio >= 0.6:
                             cell_style = "background-color: #ffeb9c; color: #9c5700; font-weight: bold; text-align: center;" 
