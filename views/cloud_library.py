@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
-import os # 🌟 NEW: ファイル名から拡張子を消すために追加
+import os
 from utils.g_sheets import get_quiz_master_dict
 from utils.g_drive import (
     upload_library_file, 
@@ -40,7 +40,6 @@ def render_cloud_library_page():
     # ==========================================
     tab_quiz, tab_exam = st.tabs([f"📝 {CAT_QUIZ}", f"🏫 {CAT_EXAM}"])
     
-    # --- タブ1: 小テスト・確認テスト ---
     with tab_quiz:
         st.subheader("📝 小テスト・確認テストを探す")
         if not quiz_names:
@@ -71,7 +70,6 @@ def render_cloud_library_page():
                     else:
                         st.info("📂 この場所にプリントはまだ登録されていません。")
 
-    # --- タブ2: 定期テスト過去問 ---
     with tab_exam:
         st.subheader("🏫 定期テストの過去問を探す")
         selected_school = st.selectbox("🏫 学校名を選択", ["-- 選択してください --"] + school_names, key="sel_e_sch")
@@ -104,34 +102,48 @@ def render_cloud_library_page():
     # ==========================================
     if is_admin:
         st.divider()
-        st.markdown("### 🔐 【管理者専用】新しい教材を登録する（一括・自動フォルダ分け対応）")
+        st.markdown("### 🔐 【管理者専用】新しい教材を登録する")
         
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
-            with st.form("upload_library_form"):
-                u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM])
+            # 🌟 修正: st.form を外し、リアルタイムにUIが変化するように変更！
+            u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM])
+            u_sub_cat = st.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校")
+            
+            uploaded_files = st.file_uploader(
+                "📄 アップロードするPDF（複数選択できます！）", 
+                type=["pdf", "png", "jpg", "jpeg"], 
+                accept_multiple_files=True
+            )
+            
+            # 🌟 複数ファイルが選ばれたら、ファイルごとに設定欄を出す！
+            if uploaded_files:
+                st.markdown("#### ⚙️ 各ファイルの設定（保存先フォルダ・ファイル名）")
+                st.info("💡 単元・章の欄に入力した名前のフォルダが自動で作成されます！")
                 
-                c_sub, c_chap = st.columns(2)
-                u_sub_cat = c_sub.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校")
+                file_settings = []
+                for i, file_obj in enumerate(uploaded_files):
+                    with st.container(border=True):
+                        st.markdown(f"**📄 {file_obj.name}**")
+                        c_chap, c_name = st.columns(2)
+                        
+                        # 拡張子なしのファイル名をデフォルトの「章」としてセット
+                        default_chap = os.path.splitext(file_obj.name)[0]
+                        
+                        chap_val = c_chap.text_input("📖 単元・章（フォルダ名）", value=default_chap, key=f"chap_{i}")
+                        name_val = c_name.text_input("📝 保存するファイル名", value=file_obj.name, key=f"name_{i}")
+                        
+                        file_settings.append({
+                            "obj": file_obj,
+                            "chap": chap_val,
+                            "name": name_val
+                        })
                 
-                # 🌟 変更: 「自動フォルダ生成」の仕様を明確にする
-                u_chap = c_chap.text_input("📖 単元・章・年度（※空欄の場合、ファイル名から自動生成）", placeholder="例：Day1（※空欄推奨）")
-                
-                uploaded_files = st.file_uploader(
-                    "📄 アップロードするPDF（複数選択できます！）", 
-                    type=["pdf", "png", "jpg", "jpeg"], 
-                    accept_multiple_files=True
-                )
-                
-                st.info("💡 複数のファイルをアップロードする場合、自動的に『ファイル名（拡張子抜き）』と同じ名前のフォルダが作成され、綺麗に振り分けられます！")
-                u_filename = st.text_input("📝 保存時のファイル名（※1つのファイルをアップロードする時のみ有効）", placeholder="例：Day1_問題.pdf")
-                
-                submit_upload = st.form_submit_button("🚀 選択した教材を書庫に登録する", type="primary")
+                # 登録ボタン
+                submit_upload = st.button("🚀 この設定で教材を一括登録する", type="primary", use_container_width=True)
                 
                 if submit_upload:
                     if not u_sub_cat:
                         st.error("⚠️ テキスト名 または 学校名 を入力してください。")
-                    elif not uploaded_files or len(uploaded_files) == 0:
-                        st.error("⚠️ ファイルが選択されていません。")
                     else:
                         progress_bar = st.progress(0)
                         status_text = st.empty()
@@ -139,35 +151,22 @@ def render_cloud_library_page():
                         success_count = 0
                         error_messages = []
                         
-                        for i, file_obj in enumerate(uploaded_files):
-                            status_text.text(f"アップロード中... ({i+1}/{len(uploaded_files)}): {file_obj.name}")
+                        for i, setting in enumerate(file_settings):
+                            f_obj = setting["obj"]
+                            f_chap = setting["chap"]
+                            f_name = setting["name"]
                             
-                            file_bytes = file_obj.getvalue()
-                            mime_type = file_obj.type
+                            status_text.text(f"アップロード中... ({i+1}/{len(file_settings)}): {f_name}")
                             
-                            # 1ファイルのみ＆ファイル名指定があればそれを使う
-                            if len(uploaded_files) == 1 and u_filename:
-                                final_filename = u_filename
-                            else:
-                                final_filename = file_obj.name
-                                
-                            # ==========================================
-                            # 🌟 パターンBのコアロジック：フォルダの自動生成
-                            # ==========================================
-                            # もし入力欄（u_chap）が空欄なら、ファイル名から「.pdf」を消したものをフォルダ名にする
-                            if not u_chap:
-                                # os.path.splitext("Day1.pdf")[0] ➡ "Day1" になる
-                                target_chapter = os.path.splitext(final_filename)[0]
-                            else:
-                                # 入力されていれば、指定されたフォルダ（パターンAの挙動）にすべて入れる
-                                target_chapter = u_chap
-                                
+                            file_bytes = f_obj.getvalue()
+                            mime_type = f_obj.type
+                            
                             success, result = robust_api_call(
                                 upload_library_file,
                                 u_cat,
                                 u_sub_cat,
-                                target_chapter,  # 🌟 ここが賢く切り替わる！
-                                final_filename,
+                                f_chap,  # 個別に入力した章を渡す
+                                f_name,  # 個別に入力した名前を渡す
                                 file_bytes,
                                 mime_type,
                                 fallback_value=(False, "APIエラー")
@@ -176,21 +175,18 @@ def render_cloud_library_page():
                             if success:
                                 success_count += 1
                             else:
-                                error_messages.append(f"{final_filename}: {result}")
+                                error_messages.append(f"{f_name}: {result}")
                                 
-                            progress_bar.progress((i + 1) / len(uploaded_files))
+                            progress_bar.progress((i + 1) / len(file_settings))
                         
                         status_text.empty()
                         
-                        msg = f"【{u_sub_cat}】"
-                        if u_chap: msg += f" ＞ 【{u_chap}】"
-                        
-                        if success_count == len(uploaded_files):
-                            st.success(f"🎉 {msg} に {success_count}件 のファイルをまとめて登録しました！")
+                        if success_count == len(file_settings):
+                            st.success(f"🎉 【{u_sub_cat}】に {success_count}件 のファイルを登録しました！")
                             time.sleep(2)
                             st.rerun()
                         elif success_count > 0:
-                            st.warning(f"⚠️ {msg} に {success_count}件 登録しましたが、一部失敗しました。")
+                            st.warning(f"⚠️ {success_count}件 登録しましたが、一部失敗しました。")
                             for err in error_messages:
                                 st.error(err)
                         else:
