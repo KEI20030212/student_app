@@ -20,6 +20,10 @@ def render_cloud_library_page():
     user_role = str(st.session_state.get('role', st.session_state.get('user_role', 'guest'))).lower()
     is_admin = user_role in ['admin', 'owner', 'am']
     
+    # 🌟 NEW: リセット用のキーを準備（画面の初期化用）
+    if 'lib_upload_key' not in st.session_state:
+        st.session_state.lib_upload_key = 0
+    
     with st.spinner("書庫のインデックスを読み込み中..."):
         quiz_details = robust_api_call(get_quiz_master_dict, fallback_value={})
         quiz_names = []
@@ -105,17 +109,19 @@ def render_cloud_library_page():
         st.markdown("### 🔐 【管理者専用】新しい教材を登録する")
         
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
-            # 🌟 修正: st.form を外し、リアルタイムにUIが変化するように変更！
-            u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM])
-            u_sub_cat = st.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校")
+            # 🌟 リセット用の変数を読み込み（この番号が変わると入力欄がまっさらになる）
+            reset_k = st.session_state.lib_upload_key
+            
+            u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM], key=f"u_cat_{reset_k}")
+            u_sub_cat = st.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校", key=f"u_sub_cat_{reset_k}")
             
             uploaded_files = st.file_uploader(
                 "📄 アップロードするPDF（複数選択できます！）", 
                 type=["pdf", "png", "jpg", "jpeg"], 
-                accept_multiple_files=True
+                accept_multiple_files=True,
+                key=f"u_files_{reset_k}" # 🌟 ここにもリセットキーをつける
             )
             
-            # 🌟 複数ファイルが選ばれたら、ファイルごとに設定欄を出す！
             if uploaded_files:
                 st.markdown("#### ⚙️ 各ファイルの設定（保存先フォルダ・ファイル名）")
                 st.info("💡 単元・章の欄に入力した名前のフォルダが自動で作成されます！")
@@ -126,11 +132,9 @@ def render_cloud_library_page():
                         st.markdown(f"**📄 {file_obj.name}**")
                         c_chap, c_name = st.columns(2)
                         
-                        # 拡張子なしのファイル名をデフォルトの「章」としてセット
                         default_chap = os.path.splitext(file_obj.name)[0]
-                        
-                        chap_val = c_chap.text_input("📖 単元・章（フォルダ名）", value=default_chap, key=f"chap_{i}")
-                        name_val = c_name.text_input("📝 保存するファイル名", value=file_obj.name, key=f"name_{i}")
+                        chap_val = c_chap.text_input("📖 単元・章（フォルダ名）", value=default_chap, key=f"chap_{reset_k}_{i}")
+                        name_val = c_name.text_input("📝 保存するファイル名", value=file_obj.name, key=f"name_{reset_k}_{i}")
                         
                         file_settings.append({
                             "obj": file_obj,
@@ -138,7 +142,6 @@ def render_cloud_library_page():
                             "name": name_val
                         })
                 
-                # 登録ボタン
                 submit_upload = st.button("🚀 この設定で教材を一括登録する", type="primary", use_container_width=True)
                 
                 if submit_upload:
@@ -165,8 +168,8 @@ def render_cloud_library_page():
                                 upload_library_file,
                                 u_cat,
                                 u_sub_cat,
-                                f_chap,  # 個別に入力した章を渡す
-                                f_name,  # 個別に入力した名前を渡す
+                                f_chap, 
+                                f_name, 
                                 file_bytes,
                                 mime_type,
                                 fallback_value=(False, "APIエラー")
@@ -184,7 +187,13 @@ def render_cloud_library_page():
                         if success_count == len(file_settings):
                             st.success(f"🎉 【{u_sub_cat}】に {success_count}件 のファイルを登録しました！")
                             time.sleep(2)
+                            
+                            # ==========================================
+                            # 🌟 NEW: アップロード大成功なら、画面をリセットする！
+                            # ==========================================
+                            st.session_state.lib_upload_key += 1 
                             st.rerun()
+                            
                         elif success_count > 0:
                             st.warning(f"⚠️ {success_count}件 登録しましたが、一部失敗しました。")
                             for err in error_messages:
