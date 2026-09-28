@@ -147,3 +147,119 @@ def delete_file_from_drive(file_id):
         except Exception as e2:
             print(f"Drive画像ゴミ箱移動エラー: {e2}")
             return False
+        
+# ==========================================
+# 📚 新機能：クラウド教材書庫（Library）用 関数群（第3階層対応版）
+# ==========================================
+import io
+from googleapiclient.http import MediaIoBaseUpload
+
+LIBRARY_ROOT_NAME = "00_教材クラウド書庫"
+
+def get_or_create_folder(service, parent_id, folder_name):
+    """指定した親フォルダの中に、特定の名前のフォルダがあるか探し、なければ作成する"""
+    query = f"'{parent_id}' in parents and name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    items = results.get('files', [])
+    
+    if items:
+        return items[0]['id']
+    
+    folder_metadata = {
+        'name': folder_name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [parent_id]
+    }
+    folder = service.files().create(body=folder_metadata, fields='id').execute()
+    return folder.get('id')
+
+import base64
+import requests
+
+def upload_library_file(category_name, sub_category_name, chapter_name, file_name, file_bytes, mime_type):
+    """
+    書庫にPDFをアップロードする（GAS経由版・容量エラー回避）
+    構成: 00_教材クラウド書庫 > [category] > [sub_category] > [chapter(任意)] > PDF
+    """
+    try:
+        service = get_drive_service()
+        
+        # --- Python側でフォルダツリー（階層）だけを作成・準備する ---
+        # （フォルダの作成は容量を食わないため、サービスアカウントでも可能）
+        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        cat_id = get_or_create_folder(service, root_lib_id, category_name)
+        sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
+        
+        parent_for_file = sub_cat_id
+        if chapter_name and str(chapter_name).strip() != "":
+            chap_id = get_or_create_folder(service, sub_cat_id, str(chapter_name).strip())
+            parent_for_file = chap_id
+            
+        # --- PDFファイルのアップロードはGASにお任せする ---
+        b64_data = base64.b64encode(file_bytes).decode('utf-8')
+        
+        # 既存のGASアプリに「このフォルダ(parent_for_file)に、このファイルを入れてね」とお願いする
+        payload = {
+            "targetFolderId": parent_for_file,  # 🌟 NEW: GAS側に保存先のフォルダIDを直接指定！
+            "fileName": file_name,
+            "mimeType": mime_type,
+            "fileData": b64_data,
+            # 既存GASの仕様に合わせるためのダミーデータ
+            "studentId": "LIBRARY",
+            "studentName": "LIBRARY"
+        }
+        
+        response = requests.post(GAS_WEBHOOK_URL, json=payload)
+        result = response.json()
+        
+        if result.get("success"):
+            return True, result.get("url")
+        else:
+            return False, result.get("error")
+            
+    except Exception as e:
+        print(f"書庫アップロードエラー(GAS経由): {e}")
+        return False, str(e)
+
+def list_library_folders(category_name, sub_category_name):
+    """🌟 NEW: 指定したテキスト（サブカテゴリ）配下にある「章・回」のフォルダ一覧を取得する"""
+    try:
+        service = get_drive_service()
+        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        cat_id = get_or_create_folder(service, root_lib_id, category_name)
+        sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
+        
+        # フォルダのみを検索
+        query = f"'{sub_cat_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        results = service.files().list(q=query, spaces='drive', fields='files(id, name)', orderBy='name').execute()
+        
+        return [f['name'] for f in results.get('files', [])]
+    except Exception as e:
+        print(f"フォルダ一覧取得エラー: {e}")
+        return []
+
+def list_library_files(category_name, sub_category_name, chapter_name=None):
+    """指定した場所のPDF一覧を取得する（ファイルのみ）"""
+    try:
+        service = get_drive_service()
+        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        cat_id = get_or_create_folder(service, root_lib_id, category_name)
+        sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
+        
+        parent_for_file = sub_cat_id
+        if chapter_name and str(chapter_name).strip() != "" and chapter_name != "-- 直下のファイル --":
+            parent_for_file = get_or_create_folder(service, sub_cat_id, chapter_name)
+        
+        # フォルダ「以外（PDFや画像）」を検索
+        query = f"'{parent_for_file}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed=false"
+        results = service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name, webViewLink)',
+            orderBy='name'
+        ).execute()
+        
+        return results.get('files', [])
+    except Exception as e:
+        print(f"書庫ファイル取得エラー: {e}")
+        return []
