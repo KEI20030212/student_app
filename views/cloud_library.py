@@ -48,16 +48,13 @@ def render_cloud_library_page():
             selected_quiz = st.selectbox("📚 テキスト・テスト名を選択", ["-- 選択してください --"] + quiz_names, key="sel_q_txt")
             
             if selected_quiz != "-- 選択してください --":
-                # 🌟 NEW: テキスト名が選ばれたら、その下にある「章・回フォルダ」を探す
                 with st.spinner("単元・章のフォルダを探しています..."):
                     chapter_folders = robust_api_call(list_library_folders, CAT_QUIZ, selected_quiz, fallback_value=[])
                 
-                # 章フォルダが存在する場合のみ、さらにプルダウンを出す！
                 selected_chapter = None
                 if chapter_folders:
                     selected_chapter = st.selectbox("📖 単元・章を選択", ["-- 選択してください --", "-- 直下のファイル --"] + chapter_folders, key="sel_q_chap")
                 
-                # 章が選ばれた（または章フォルダが存在しない）場合にファイルを検索
                 if not chapter_folders or (chapter_folders and selected_chapter and selected_chapter != "-- 選択してください --"):
                     with st.spinner("書庫からPDFを探しています...🔍"):
                         files = robust_api_call(list_library_files, CAT_QUIZ, selected_quiz, selected_chapter, fallback_value=[])
@@ -79,7 +76,6 @@ def render_cloud_library_page():
         selected_school = st.selectbox("🏫 学校名を選択", ["-- 選択してください --"] + school_names, key="sel_e_sch")
         
         if selected_school != "-- 選択してください --":
-            # 過去問でも同じように「年度・学期フォルダ」があればプルダウンを出す
             with st.spinner("年度・学期のフォルダを探しています..."):
                 exam_folders = robust_api_call(list_library_folders, CAT_EXAM, selected_school, fallback_value=[])
             
@@ -107,7 +103,7 @@ def render_cloud_library_page():
     # ==========================================
     if is_admin:
         st.divider()
-        st.markdown("### 🔐 【管理者専用】新しい教材を登録する")
+        st.markdown("### 🔐 【管理者専用】新しい教材を登録する（一括登録対応）")
         
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
             with st.form("upload_library_form"):
@@ -115,31 +111,51 @@ def render_cloud_library_page():
                 
                 c_sub, c_chap = st.columns(2)
                 u_sub_cat = c_sub.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校")
-                
-                # 🌟 NEW: 章・回の入力欄！
                 u_chap = c_chap.text_input("📖 単元・章・年度（任意）", placeholder="例：Day1 / 2026年1学期中間")
                 
-                uploaded_file = st.file_uploader("📄 アップロードするPDF", type=["pdf", "png", "jpg", "jpeg"])
-                u_filename = st.text_input("📝 保存時のファイル名（※空欄の場合は元のファイル名のまま）", placeholder="例：Day1_問題.pdf")
+                # 🌟 変更点: accept_multiple_files=True に設定し、複数ファイルを選択可能にする
+                uploaded_files = st.file_uploader(
+                    "📄 アップロードするPDF（複数選択できます！）", 
+                    type=["pdf", "png", "jpg", "jpeg"], 
+                    accept_multiple_files=True
+                )
                 
-                submit_upload = st.form_submit_button("🚀 この教材を書庫に登録する", type="primary")
+                st.info("💡 複数のファイルを選択した場合、ファイル名には「元のファイル名」がそのまま使用されます。ファイル名を変更して保存したい場合は、1つずつアップロードしてください。")
+                u_filename = st.text_input("📝 保存時のファイル名（※1つのファイルをアップロードする時のみ有効）", placeholder="例：Day1_問題.pdf")
+                
+                submit_upload = st.form_submit_button("🚀 選択した教材をまとめて書庫に登録する", type="primary")
                 
                 if submit_upload:
                     if not u_sub_cat:
                         st.error("⚠️ テキスト名 または 学校名 を入力してください。")
-                    elif not uploaded_file:
+                    elif not uploaded_files or len(uploaded_files) == 0:
                         st.error("⚠️ ファイルが選択されていません。")
                     else:
-                        with st.spinner("クラウド書庫にアップロード中...☁️"):
-                            file_bytes = uploaded_file.getvalue()
-                            final_filename = u_filename if u_filename else uploaded_file.name
-                            mime_type = uploaded_file.type
+                        # 🌟 複数ファイル対応のアップロード処理
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        success_count = 0
+                        error_messages = []
+                        
+                        for i, file_obj in enumerate(uploaded_files):
+                            # 進捗の表示
+                            status_text.text(f"アップロード中... ({i+1}/{len(uploaded_files)}): {file_obj.name}")
                             
+                            file_bytes = file_obj.getvalue()
+                            mime_type = file_obj.type
+                            
+                            # 1つのファイルで、かつファイル名の指定があればそれを使う。それ以外は元の名前。
+                            if len(uploaded_files) == 1 and u_filename:
+                                final_filename = u_filename
+                            else:
+                                final_filename = file_obj.name
+                                
                             success, result = robust_api_call(
                                 upload_library_file,
                                 u_cat,
                                 u_sub_cat,
-                                u_chap,  # 🌟 NEW: 章の名前を渡す
+                                u_chap,
                                 final_filename,
                                 file_bytes,
                                 mime_type,
@@ -147,10 +163,28 @@ def render_cloud_library_page():
                             )
                             
                             if success:
-                                msg = f"【{u_sub_cat}】"
-                                if u_chap: msg += f" ＞ 【{u_chap}】"
-                                st.success(f"🎉 {msg} に {final_filename} を登録しました！")
-                                time.sleep(2)
-                                st.rerun()
+                                success_count += 1
                             else:
-                                st.error(f"アップロードに失敗しました: {result}")
+                                error_messages.append(f"{final_filename}: {result}")
+                                
+                            # プログレスバーを更新
+                            progress_bar.progress((i + 1) / len(uploaded_files))
+                        
+                        status_text.empty()
+                        
+                        # 🌟 最終結果の表示
+                        msg = f"【{u_sub_cat}】"
+                        if u_chap: msg += f" ＞ 【{u_chap}】"
+                        
+                        if success_count == len(uploaded_files):
+                            st.success(f"🎉 {msg} に {success_count}件 のファイルをまとめて登録しました！")
+                            time.sleep(2)
+                            st.rerun()
+                        elif success_count > 0:
+                            st.warning(f"⚠️ {msg} に {success_count}件 登録しましたが、一部失敗しました。")
+                            for err in error_messages:
+                                st.error(err)
+                        else:
+                            st.error("すべてのアップロードに失敗しました。")
+                            for err in error_messages:
+                                st.error(err)
