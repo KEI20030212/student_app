@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
+import os # 🌟 NEW: ファイル名から拡張子を消すために追加
 from utils.g_sheets import get_quiz_master_dict
 from utils.g_drive import (
     upload_library_file, 
@@ -103,7 +104,7 @@ def render_cloud_library_page():
     # ==========================================
     if is_admin:
         st.divider()
-        st.markdown("### 🔐 【管理者専用】新しい教材を登録する（一括登録対応）")
+        st.markdown("### 🔐 【管理者専用】新しい教材を登録する（一括・自動フォルダ分け対応）")
         
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
             with st.form("upload_library_form"):
@@ -111,19 +112,20 @@ def render_cloud_library_page():
                 
                 c_sub, c_chap = st.columns(2)
                 u_sub_cat = c_sub.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校")
-                u_chap = c_chap.text_input("📖 単元・章・年度（任意）", placeholder="例：Day1 / 2026年1学期中間")
                 
-                # 🌟 変更点: accept_multiple_files=True に設定し、複数ファイルを選択可能にする
+                # 🌟 変更: 「自動フォルダ生成」の仕様を明確にする
+                u_chap = c_chap.text_input("📖 単元・章・年度（※空欄の場合、ファイル名から自動生成）", placeholder="例：Day1（※空欄推奨）")
+                
                 uploaded_files = st.file_uploader(
                     "📄 アップロードするPDF（複数選択できます！）", 
                     type=["pdf", "png", "jpg", "jpeg"], 
                     accept_multiple_files=True
                 )
                 
-                st.info("💡 複数のファイルを選択した場合、ファイル名には「元のファイル名」がそのまま使用されます。ファイル名を変更して保存したい場合は、1つずつアップロードしてください。")
+                st.info("💡 複数のファイルをアップロードする場合、自動的に『ファイル名（拡張子抜き）』と同じ名前のフォルダが作成され、綺麗に振り分けられます！")
                 u_filename = st.text_input("📝 保存時のファイル名（※1つのファイルをアップロードする時のみ有効）", placeholder="例：Day1_問題.pdf")
                 
-                submit_upload = st.form_submit_button("🚀 選択した教材をまとめて書庫に登録する", type="primary")
+                submit_upload = st.form_submit_button("🚀 選択した教材を書庫に登録する", type="primary")
                 
                 if submit_upload:
                     if not u_sub_cat:
@@ -131,7 +133,6 @@ def render_cloud_library_page():
                     elif not uploaded_files or len(uploaded_files) == 0:
                         st.error("⚠️ ファイルが選択されていません。")
                     else:
-                        # 🌟 複数ファイル対応のアップロード処理
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
@@ -139,23 +140,33 @@ def render_cloud_library_page():
                         error_messages = []
                         
                         for i, file_obj in enumerate(uploaded_files):
-                            # 進捗の表示
                             status_text.text(f"アップロード中... ({i+1}/{len(uploaded_files)}): {file_obj.name}")
                             
                             file_bytes = file_obj.getvalue()
                             mime_type = file_obj.type
                             
-                            # 1つのファイルで、かつファイル名の指定があればそれを使う。それ以外は元の名前。
+                            # 1ファイルのみ＆ファイル名指定があればそれを使う
                             if len(uploaded_files) == 1 and u_filename:
                                 final_filename = u_filename
                             else:
                                 final_filename = file_obj.name
                                 
+                            # ==========================================
+                            # 🌟 パターンBのコアロジック：フォルダの自動生成
+                            # ==========================================
+                            # もし入力欄（u_chap）が空欄なら、ファイル名から「.pdf」を消したものをフォルダ名にする
+                            if not u_chap:
+                                # os.path.splitext("Day1.pdf")[0] ➡ "Day1" になる
+                                target_chapter = os.path.splitext(final_filename)[0]
+                            else:
+                                # 入力されていれば、指定されたフォルダ（パターンAの挙動）にすべて入れる
+                                target_chapter = u_chap
+                                
                             success, result = robust_api_call(
                                 upload_library_file,
                                 u_cat,
                                 u_sub_cat,
-                                u_chap,
+                                target_chapter,  # 🌟 ここが賢く切り替わる！
                                 final_filename,
                                 file_bytes,
                                 mime_type,
@@ -167,12 +178,10 @@ def render_cloud_library_page():
                             else:
                                 error_messages.append(f"{final_filename}: {result}")
                                 
-                            # プログレスバーを更新
                             progress_bar.progress((i + 1) / len(uploaded_files))
                         
                         status_text.empty()
                         
-                        # 🌟 最終結果の表示
                         msg = f"【{u_sub_cat}】"
                         if u_chap: msg += f" ＞ 【{u_chap}】"
                         
