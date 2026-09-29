@@ -6,7 +6,8 @@ from utils.g_sheets import get_quiz_master_dict
 from utils.g_drive import (
     upload_library_file, 
     list_library_files,
-    list_library_folders
+    list_library_folders,
+    delete_library_file  # 🌟 NEW: 削除用の関数をインポート
 )
 from utils.api_guard import robust_api_call
 
@@ -20,7 +21,6 @@ def render_cloud_library_page():
     user_role = str(st.session_state.get('role', st.session_state.get('user_role', 'guest'))).lower()
     is_admin = user_role in ['admin', 'owner', 'am']
     
-    # 🌟 NEW: リセット用のキーを準備（画面の初期化用）
     if 'lib_upload_key' not in st.session_state:
         st.session_state.lib_upload_key = 0
     
@@ -38,6 +38,47 @@ def render_cloud_library_page():
         ]
 
     st.divider()
+
+    # ==========================================
+    # 🌟 共通のファイル表示＆削除処理関数
+    # ==========================================
+    def display_files(files_list):
+        if not files_list:
+            st.info("📂 この場所にプリントはまだ登録されていません。")
+            return
+            
+        st.success(f"📂 プリントが {len(files_list)} 件見つかりました！")
+        
+        for file in files_list:
+            file_id = file.get('id')
+            file_name = file.get('name')
+            
+            with st.container(border=True):
+                # 🌟 管理者かどうかでカラムの分割幅を変える
+                if is_admin:
+                    c1, c2, c3 = st.columns([6, 2, 2])
+                else:
+                    c1, c2 = st.columns([8, 2])
+                
+                c1.markdown(f"📄 **{file_name}**")
+                
+                link = file.get('webViewLink')
+                if link: 
+                    c2.link_button("👁️ 開く・印刷", link, use_container_width=True)
+                
+                # 🌟 管理者のみ削除ボタンを表示
+                if is_admin:
+                    # ボタンのkeyが重複しないようにfile_idを使う
+                    if c3.button("🗑️ 削除", key=f"del_{file_id}", type="secondary", use_container_width=True):
+                        with st.spinner(f"「{file_name}」を削除中..."):
+                            success, msg = robust_api_call(delete_library_file, file_id, fallback_value=(False, "エラー"))
+                            
+                            if success:
+                                st.success("✅ 削除（gomiフォルダへ移動）しました。")
+                                time.sleep(1)
+                                st.rerun() # 画面をリロードして一覧から消す
+                            else:
+                                st.error(f"削除に失敗しました: {msg}")
 
     # ==========================================
     # 🌟 閲覧・ダウンロードエリア
@@ -63,16 +104,7 @@ def render_cloud_library_page():
                     with st.spinner("書庫からPDFを探しています...🔍"):
                         files = robust_api_call(list_library_files, CAT_QUIZ, selected_quiz, selected_chapter, fallback_value=[])
                     
-                    if files:
-                        st.success(f"📂 プリントが {len(files)} 件見つかりました！")
-                        for file in files:
-                            with st.container(border=True):
-                                c1, c2 = st.columns([8, 2])
-                                c1.markdown(f"📄 **{file.get('name')}**")
-                                link = file.get('webViewLink')
-                                if link: c2.link_button("👁️ 開く・印刷", link, use_container_width=True)
-                    else:
-                        st.info("📂 この場所にプリントはまだ登録されていません。")
+                    display_files(files) # 🌟 共通関数で描画
 
     with tab_exam:
         st.subheader("🏫 定期テストの過去問を探す")
@@ -90,16 +122,7 @@ def render_cloud_library_page():
                 with st.spinner("書庫からPDFを探しています...🔍"):
                     files = robust_api_call(list_library_files, CAT_EXAM, selected_school, selected_exam_chap, fallback_value=[])
                 
-                if files:
-                    st.success(f"📂 過去問が {len(files)} 件見つかりました！")
-                    for file in files:
-                        with st.container(border=True):
-                            c1, c2 = st.columns([8, 2])
-                            c1.markdown(f"📄 **{file.get('name')}**")
-                            link = file.get('webViewLink')
-                            if link: c2.link_button("👁️ 開く・印刷", link, use_container_width=True)
-                else:
-                    st.info("📂 この場所に過去問はまだ登録されていません。")
+                display_files(files) # 🌟 共通関数で描画
 
     # ==========================================
     # 📤 アップロードエリア（管理者専用）
@@ -109,7 +132,6 @@ def render_cloud_library_page():
         st.markdown("### 🔐 【管理者専用】新しい教材を登録する")
         
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
-            # 🌟 リセット用の変数を読み込み（この番号が変わると入力欄がまっさらになる）
             reset_k = st.session_state.lib_upload_key
             
             u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM], key=f"u_cat_{reset_k}")
@@ -119,7 +141,7 @@ def render_cloud_library_page():
                 "📄 アップロードするPDF（複数選択できます！）", 
                 type=["pdf", "png", "jpg", "jpeg"], 
                 accept_multiple_files=True,
-                key=f"u_files_{reset_k}" # 🌟 ここにもリセットキーをつける
+                key=f"u_files_{reset_k}"
             )
             
             if uploaded_files:
@@ -188,9 +210,6 @@ def render_cloud_library_page():
                             st.success(f"🎉 【{u_sub_cat}】に {success_count}件 のファイルを登録しました！")
                             time.sleep(2)
                             
-                            # ==========================================
-                            # 🌟 NEW: アップロード大成功なら、画面をリセットする！
-                            # ==========================================
                             st.session_state.lib_upload_key += 1 
                             st.rerun()
                             
