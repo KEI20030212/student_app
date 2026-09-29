@@ -263,3 +263,28 @@ def list_library_files(category_name, sub_category_name, chapter_name=None):
     except Exception as e:
         print(f"書庫ファイル取得エラー: {e}")
         return []
+
+# ==========================================
+# 🗑️ 書庫ファイルの削除（GAS経由でgomiフォルダへ移動）
+# ==========================================
+import requests
+# ※GAS_WEBHOOK_URL が定義されている前提です
+def delete_library_file(file_id):
+    """GASに「このファイルを削除（gomiへ移動）して」とお願いする"""
+    try:
+        payload = {
+            "action": "deleteFile",
+            "fileId": file_id
+        }
+        
+        response = requests.post(GAS_WEBHOOK_URL, json=payload)
+        result = response.json()
+        
+        if result.get("success"):
+            return True, "削除成功"
+        else:
+            return False, result.get("error")
+            
+    except Exception as e:
+        print(f"ファイル削除エラー(GAS経由): {e}")
+        return False, str(e)
