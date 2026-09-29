@@ -1633,6 +1633,107 @@ def save_quizzes_to_dedicated_sheet(rows):
     ws.append_rows(rows, value_input_option="RAW")
     return True
 
+def update_quiz_record(target_data, new_data):
+    """
+    小テストの特定の記録を探して書き換える（更新）
+    target_data: 変更前のデータ（検索用キー） {'名前': '...', '日時': '...', 'テキスト': '...', '単元': '...'}
+    new_data: 変更後のデータ {'日時': '...', '単元': '...', '点数': '...'}
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("小テスト記録")
+        
+        # 全データを取得して、該当する行を探す
+        all_records = ws.get_all_values()
+        if not all_records:
+            return False
+            
+        header = all_records[0]
+        # 列のインデックスを特定
+        idx_date = header.index("日時")
+        idx_name = header.index("名前")
+        idx_quiz = header.index("テキスト")
+        idx_unit = header.index("単元")
+        idx_score = header.index("点数")
+        
+        target_row_number = None
+        
+        # 下（新しいデータ）から探す方が早い可能性が高いため逆順ループ
+        for i in range(len(all_records) - 1, 0, -1):
+            row = all_records[i]
+            if len(row) > idx_score:
+                if (str(row[idx_name]) == str(target_data["名前"]) and
+                    str(row[idx_date]) == str(target_data["日時"]) and
+                    str(row[idx_quiz]) == str(target_data["テキスト"]) and
+                    str(row[idx_unit]) == str(target_data["単元"])):
+                    
+                    target_row_number = i + 1  # スプレッドシートの行番号は1始まり
+                    break
+        
+        if target_row_number:
+            # 該当行が見つかったら、必要なセルだけをピンポイントで更新（1回の通信で済ませる）
+            cells_to_update = [
+                gspread.Cell(row=target_row_number, col=idx_date + 1, value=new_data["日時"]),
+                gspread.Cell(row=target_row_number, col=idx_unit + 1, value=new_data["単元"]),
+                gspread.Cell(row=target_row_number, col=idx_score + 1, value=new_data["点数"])
+            ]
+            ws.update_cells(cells_to_update, value_input_option='RAW')
+            return True
+        else:
+            print("更新対象の行が見つかりませんでした")
+            return False
+            
+    except Exception as e:
+        print(f"小テスト更新エラー: {e}")
+        return False
+
+def delete_quiz_record(target_data):
+    """
+    小テストの特定の記録を探して行ごと削除する
+    target_data: 削除対象のデータ（検索用キー） {'名前': '...', '日時': '...', 'テキスト': '...', '単元': '...'}
+    """
+    try:
+        gc = get_gc_client()
+        sh = gc.open_by_key(SPREADSHEET_ID)
+        ws = sh.worksheet("小テスト記録")
+        
+        all_records = ws.get_all_values()
+        if not all_records:
+            return False
+            
+        header = all_records[0]
+        idx_date = header.index("日時")
+        idx_name = header.index("名前")
+        idx_quiz = header.index("テキスト")
+        idx_unit = header.index("単元")
+        
+        target_row_number = None
+        
+        # 逆順で探す
+        for i in range(len(all_records) - 1, 0, -1):
+            row = all_records[i]
+            if len(row) > idx_unit:
+                if (str(row[idx_name]) == str(target_data["名前"]) and
+                    str(row[idx_date]) == str(target_data["日時"]) and
+                    str(row[idx_quiz]) == str(target_data["テキスト"]) and
+                    str(row[idx_unit]) == str(target_data["単元"])):
+                    
+                    target_row_number = i + 1
+                    break
+                    
+        if target_row_number:
+            # 行を丸ごと削除する
+            ws.delete_rows(target_row_number)
+            return True
+        else:
+            print("削除対象の行が見つかりませんでした")
+            return False
+            
+    except Exception as e:
+        print(f"小テスト削除エラー: {e}")
+        return False
+
 #quiz_maker.py
 def add_quiz_maker_sheet(test_name, sheet_id, full_marks, paper_size="A4"): # 🌟 ここに full_marks を追加！
     gc = get_gc_client()
