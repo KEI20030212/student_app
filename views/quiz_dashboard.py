@@ -10,7 +10,10 @@ from utils.g_sheets import (
     get_quiz_master_dict,                
     save_quizzes_to_dedicated_sheet,  
     load_quiz_records,
-    get_textbook_master
+    get_textbook_master,
+    # 🌟 NEW: これから g_sheets.py に追加する関数をインポート
+    update_quiz_record,  
+    delete_quiz_record   
 )
 from utils.api_guard import robust_api_call
 
@@ -45,7 +48,6 @@ def render_quiz_list_page():
 
     student_options = (df_students_raw['生徒ID'].astype(str) + " - " + df_students_raw['生徒名']).tolist()
     
-    # 🌟 生徒名から「所属校舎」と「学年」を特定する辞書を作成
     student_name_to_branch = {}
     student_name_to_grade = {} 
     
@@ -72,7 +74,6 @@ def render_quiz_list_page():
             if q_name not in quiz_names:
                 quiz_names.append(q_name)
 
-    # 🌟 表を綺麗に装飾する関数群
     def sort_key(c):
         nums = re.findall(r'\d+', str(c))
         return int(nums[0]) if nums else 999
@@ -126,9 +127,13 @@ def render_quiz_list_page():
             return styled_display.style.map(color_bg)
 
     # ==========================================
-    # 🌟 メインの画面構成
+    # 🌟 メインの画面構成（タブを3つに！）
     # ==========================================
-    tab_student, tab_quiz_all = st.tabs(["👤 生徒別データ ＆ 結果入力", "📊 小テスト別 クラス全体マップ"])
+    tab_student, tab_quiz_all, tab_edit = st.tabs([
+        "👤 生徒別データ ＆ 結果入力", 
+        "📊 小テスト別 クラス全体マップ", 
+        "⚙️ 履歴の編集・削除"  # 🌟 NEW
+    ])
 
     # -----------------------------------------------------
     # タブ1: 生徒別データ ＆ 結果入力
@@ -280,12 +285,8 @@ def render_quiz_list_page():
                                 )
                                 
                                 if not pivot_all.empty:
-                                    # 1. 列（単元）を順番に並べ替え
                                     pivot_all = pivot_all[sorted(pivot_all.columns.tolist(), key=sort_key)]
                                     
-                                    # ==========================================
-                                    # 🌟 NEW: 「名前」と「学年」を別々の列に分けてマルチインデックス化！
-                                    # ==========================================
                                     pivot_all = pivot_all.reset_index()
                                     pivot_all['学年'] = pivot_all['名前'].map(lambda x: student_name_to_grade.get(x, "未設定"))
                                     
@@ -300,11 +301,7 @@ def render_quiz_list_page():
                                         return 99
                                         
                                     pivot_all['学年_ソート'] = pivot_all['学年'].apply(get_grade_rank)
-                                    
-                                    # 学年順 ➡ 名前順 に並び替え
                                     pivot_all = pivot_all.sort_values(by=['学年_ソート', '名前'])
-                                    
-                                    # ソート列を消して、「学年」と「名前」をインデックス（左側の2列固定）にセット！
                                     pivot_all = pivot_all.drop(columns=['学年_ソート'])
                                     pivot_all = pivot_all.set_index(['学年', '名前'])
                                     
@@ -313,7 +310,6 @@ def render_quiz_list_page():
                                     styled_all_df = style_pivot_dataframe(pivot_all, selected_quiz_for_map)
                                     st.dataframe(styled_all_df, use_container_width=True)
                                     
-                                    # Excelダウンロード
                                     excel_buffer = io.BytesIO()
                                     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
                                         styled_all_df.to_excel(writer, sheet_name=branch)
@@ -333,3 +329,100 @@ def render_quiz_list_page():
                                     )
                                 else:
                                     st.info(f"この小テストを受けた {branch} の生徒はいません。")
+
+    # -----------------------------------------------------
+    # 🌟 NEW タブ3: 履歴の編集・削除
+    # -----------------------------------------------------
+    with tab_edit:
+        st.subheader("⚙️ 履歴の編集・削除")
+        st.write("過去に入力した小テストの「点数」や「単元」を修正したり、誤って入力した記録を削除できます。")
+        
+        edit_student_option = st.selectbox("👤 対象の生徒を選択", student_options, index=None, placeholder="-- 生徒を選択 --", key="edit_student_sel")
+        
+        if edit_student_option:
+            e_student_name = edit_student_option.split(" - ")[1]
+            df_edit = df_all_quizzes[df_all_quizzes['名前'] == e_student_name].copy()
+            
+            if df_edit.empty:
+                st.info(f"{e_student_name} さんの記録はまだありません。")
+            else:
+                # 📝 新しい記録が上に来るように日付で並べ替え
+                df_edit['日時_dt'] = pd.to_datetime(df_edit['日時'], format='mixed', errors='coerce')
+                df_edit = df_edit.sort_values(by='日時_dt', ascending=False).reset_index(drop=True)
+                
+                st.markdown(f"#### 📄 {e_student_name} さんの入力履歴")
+                
+                for i, row in df_edit.iterrows():
+                    orig_date = str(row['日時'])
+                    orig_quiz = str(row['テキスト'])
+                    orig_unit = str(row['単元'])
+                    orig_score = str(row['点数'])
+                    
+                    # アコーディオン（折りたたみ）で1件ずつ表示
+                    with st.expander(f"📅 {orig_date} | 📚 {orig_quiz} (第{orig_unit}回) | 💯 {orig_score}点"):
+                        
+                        # --- ✏️ 編集エリア ---
+                        with st.form(f"edit_form_{i}"):
+                            st.write("▼ 内容を修正して「更新」を押してください")
+                            c1, c2, c3 = st.columns(3)
+                            
+                            try: parsed_date = pd.to_datetime(orig_date).date()
+                            except: parsed_date = datetime.date.today()
+                            new_date = c1.date_input("実施日", parsed_date, key=f"d_{i}")
+                            
+                            try: default_unit = int(float(orig_unit))
+                            except: default_unit = 1
+                            new_unit = c2.number_input("単元・回", value=default_unit, step=1, key=f"u_{i}")
+                            
+                            try: default_score = int(float(orig_score))
+                            except: default_score = 0
+                            new_score = c3.number_input("点数", value=default_score, step=1, key=f"s_{i}")
+                            
+                            submit_edit = st.form_submit_button("💾 この内容で更新する", type="primary")
+                            
+                            if submit_edit:
+                                target_data = {
+                                    "名前": e_student_name,
+                                    "日時": orig_date,
+                                    "テキスト": orig_quiz,
+                                    "単元": orig_unit,
+                                    "点数": orig_score
+                                }
+                                new_data = {
+                                    "日時": new_date.strftime("%Y/%m/%d"),
+                                    "単元": new_unit,
+                                    "点数": new_score
+                                }
+                                with st.spinner("スプレッドシートを更新中..."):
+                                    success = robust_api_call(update_quiz_record, target_data, new_data, fallback_value=False)
+                                    if success:
+                                        st.success("✅ 更新しました！")
+                                        load_quiz_records.clear()
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ 更新に失敗しました。")
+                        
+                        # --- 🗑️ 削除エリア（誤操作防止の安全装置付き） ---
+                        st.write("")
+                        st.write("▼ この記録を削除する場合は、チェックを入れてからボタンを押してください")
+                        del_check = st.checkbox("本当に削除する", key=f"chk_{i}")
+                        
+                        if del_check:
+                            if st.button("🗑️ 削除を実行", key=f"del_btn_{i}", type="secondary"):
+                                target_data = {
+                                    "名前": e_student_name,
+                                    "日時": orig_date,
+                                    "テキスト": orig_quiz,
+                                    "単元": orig_unit,
+                                    "点数": orig_score
+                                }
+                                with st.spinner("スプレッドシートから削除中..."):
+                                    success = robust_api_call(delete_quiz_record, target_data, fallback_value=False)
+                                    if success:
+                                        st.success("✅ 削除しました！")
+                                        load_quiz_records.clear()
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ 削除に失敗しました。")
