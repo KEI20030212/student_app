@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import datetime
 
-# 🌟 必要な関数をインポート（送信済みフラグ管理用の関数を追加！）
 from utils.g_sheets import (
     get_student_master,
     load_self_study_data,
@@ -35,10 +34,14 @@ def render_monthly_visual_report_tab():
     st.write("保護者のLINEへ送付する「月間学習レポート（テキスト版）」を自動生成します。")
     st.caption("※対象の月を選ぶだけで、全員分のレポート文章が瞬時に作成されます。コピーしてLINEに貼り付けてください。")
     
-    # UI: 月の選択（デフォルトは今月）
+    # UI: 月の選択とアンケートURLの入力
+    c1, c2 = st.columns([1, 2])
     today = datetime.date.today()
     month_options = [(today.replace(day=1) - pd.DateOffset(months=i)).strftime('%Y年%m月') for i in range(6)]
-    selected_month = st.selectbox("📅 出力する月を選択", month_options, index=0)
+    selected_month = c1.selectbox("📅 出力する月を選択", month_options, index=0)
+    
+    # 🌟 NEW: アンケートURLの入力欄
+    survey_url = c2.text_input("📋 今月のアンケートURL（任意）", placeholder="https://forms.gle/...")
     
     st.divider()
     
@@ -54,7 +57,7 @@ def render_monthly_visual_report_tab():
         st.warning("生徒データが読み込めません。")
         return
 
-    # --- データの事前処理（選択された月で絞り込み） ---
+    # --- データの事前処理 ---
     if not df_ss.empty and "APIエラー発生" not in df_ss.columns:
         df_ss['日付'] = pd.to_datetime(df_ss['日付'], errors='coerce')
         df_ss['年月'] = df_ss['日付'].dt.strftime('%Y年%m月')
@@ -76,7 +79,7 @@ def render_monthly_visual_report_tab():
     else:
         df_logs_month = pd.DataFrame()
 
-    # --- 生徒の振り分け（校舎ごと） ---
+    # --- 生徒の振り分け ---
     id_col = '生徒ID' if '生徒ID' in df_students.columns else None
     name_col = '生徒名' if '生徒名' in df_students.columns else '名前'
     
@@ -109,21 +112,16 @@ def render_monthly_visual_report_tab():
                     log_name_col = '生徒名' if '生徒名' in df_logs_month.columns else '名前'
                     s_logs = df_logs_month[df_logs_month[log_name_col] == student_name]
 
-                # ==========================================
-                # ① 授業コマ数 ＆ 🌟遅刻回数 の計算
-                # ==========================================
                 q_count = 0
                 normal_count = 0
-                late_count = 0 # 🌟遅刻回数カウント用
+                late_count = 0 
                 
                 if not s_logs.empty:
-                    # 🌟 遅刻列の集計（0より大きい数値を遅刻とみなしてカウント）
                     if '遅刻時間' in s_logs.columns:
                         late_series = pd.to_numeric(s_logs['遅刻時間'], errors='coerce').fillna(0)
                         late_count = (late_series > 0).sum()
 
                     for _, r in s_logs.iterrows():
-                        # スペースを綺麗に消す（全角と半角）
                         row_str = str(r.to_dict().values()).replace(" ", "").replace(" ", "")
                         if "1:1(Q)" in row_str or "1:1(Ｑ)" in row_str:
                             q_count += 1
@@ -136,13 +134,9 @@ def render_monthly_visual_report_tab():
                 else:
                     class_text = f"合計： {normal_count} コマ"
 
-                # 🌟 【案A】遅刻があった場合のみ、文面にさりげなく追記する
                 if late_count > 0:
                     class_text += f"\n（※今月は {late_count}回の遅刻記録がありました）"
 
-                # ==========================================
-                # ② 自習時間の計算
-                # ==========================================
                 total_ss_minutes = 0
                 if not df_ss_month.empty:
                     s_ss = df_ss_month[df_ss_month['名前'] == student_name]
@@ -154,9 +148,6 @@ def render_monthly_visual_report_tab():
                 if total_ss_minutes == 0:
                     ss_text = "0分"
 
-                # ==========================================
-                # ③ 宿題達成率の計算
-                # ==========================================
                 assigned = 0
                 done = 0
                 hw_rate = -1
@@ -170,9 +161,6 @@ def render_monthly_visual_report_tab():
                 else:
                     hw_block = ""
 
-                # ==========================================
-                # ④ 小テスト結果のリスト化
-                # ==========================================
                 quiz_lines = []
                 if not df_quiz_month.empty:
                     s_quiz = df_quiz_month[df_quiz_month['名前'] == student_name].copy()
@@ -207,9 +195,6 @@ def render_monthly_visual_report_tab():
                 
                 quiz_result_text = "\n".join(quiz_lines) if quiz_lines else "今月の小テスト実施記録はありません。"
 
-                # ==========================================
-                # ⑤ 自動褒め言葉
-                # ==========================================
                 dynamic_praise = ""
                 if hw_rate >= 90:
                     dynamic_praise = "毎回の宿題も非常に高い達成率でこなせており、素晴らしい学習習慣が身についています！"
@@ -220,9 +205,15 @@ def render_monthly_visual_report_tab():
                 else:
                     dynamic_praise = "日々の授業に真剣に取り組み、一歩ずつ着実に前進しています！"
 
-                # ==========================================
-                # ⑥ メッセージ文面の組み立て
-                # ==========================================
+                # 🌟 NEW: アンケートの文面ブロックを作成
+                survey_block = ""
+                if survey_url.strip():
+                    survey_block = f"""
+📋 【ご意見・ご要望アンケート】
+より良い指導のため、ご家庭での様子やご要望など、簡単なアンケートにご協力をお願いいたします！
+👉 {survey_url.strip()}
+"""
+
                 message = f"""保護者様
 
 いつもお世話になっております。
@@ -242,32 +233,25 @@ def render_monthly_visual_report_tab():
 {dynamic_praise}
 引き続きスタッフ一同、全力でサポートしてまいります。
 ご自宅でもぜひ、今月の頑張りを褒めてあげてください！
-
+{survey_block}
 よろしくお願いいたします。
 槌屋"""
 
-                # ==========================================
-                # ⑦ 送信済みチェック＆要フォロー機能
-                # ==========================================
                 needs_followup = False
                 followup_reasons = []
                 
-                # 授業を受けている（1コマ以上）のに自習時間が0分
                 if total_classes > 0 and total_ss_minutes == 0:
                     needs_followup = True
                     followup_reasons.append("今月の自習時間0分")
                     
-                # 宿題達成率が50%未満（出されている場合）
                 if hw_rate != -1 and hw_rate < 50:
                     needs_followup = True
                     followup_reasons.append(f"宿題達成率が低い（{hw_rate}%）")
                 
-                # 🌟 【NEW!】遅刻が2回以上ある場合
                 if late_count >= 2:
                     needs_followup = True
                     followup_reasons.append(f"遅刻が複数回（{late_count}回）あり")
 
-                # UIの描画
                 checkbox_key = f"sent_{selected_month}_{student_id}"
                 is_already_sent = str(student_id) in sent_id_list
                 
