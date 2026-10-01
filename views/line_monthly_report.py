@@ -40,7 +40,6 @@ def render_monthly_visual_report_tab():
     month_options = [(today.replace(day=1) - pd.DateOffset(months=i)).strftime('%Y年%m月') for i in range(6)]
     selected_month = c1.selectbox("📅 出力する月を選択", month_options, index=0)
     
-    # 🌟 NEW: アンケートURLの入力欄
     survey_url = c2.text_input("📋 今月のアンケートURL（任意）", placeholder="https://forms.gle/...")
     
     st.divider()
@@ -161,38 +160,63 @@ def render_monthly_visual_report_tab():
                 else:
                     hw_block = ""
 
+                # ==========================================
+                # 🌟 小テスト結果を2列に圧縮する処理
+                # ==========================================
                 quiz_lines = []
+                has_quiz = False
+                
                 if not df_quiz_month.empty:
                     s_quiz = df_quiz_month[df_quiz_month['名前'] == student_name].copy()
                     
                     if not s_quiz.empty:
+                        has_quiz = True
                         s_quiz['単元_ソート用'] = s_quiz['単元'].astype(str).str.extract(r'(\d+)')[0]
                         s_quiz['単元_ソート用'] = pd.to_numeric(s_quiz['単元_ソート用'], errors='coerce').fillna(9999)
                         s_quiz = s_quiz.sort_values(by=['テキスト', '単元_ソート用', '日時'], ascending=[True, True, True])
 
-                    for _, row in s_quiz.iterrows():
-                        t_name_raw = row.get('テキスト', '不明')
-                        chap_raw = row.get('単元', '不明')
-                        score = row.get('点数', '不明')
+                        # テキスト（科目）ごとにグループ化して処理
+                        grouped_quiz = s_quiz.groupby('テキスト')
                         
-                        t_name = str(t_name_raw).strip()
-                        try:
-                            chap = str(int(float(chap_raw)))
-                        except Exception:
-                            chap = str(chap_raw).strip()
-                            if chap.endswith('.0'): chap = chap[:-2]
-                        
-                        full_marks = 100 
-                        for key_in_dict, data_in_dict in quiz_master.items():
-                            if t_name in key_in_dict:
-                                full_marks = data_in_dict.get("full_marks", 100)
-                                break 
-                        
-                        if isinstance(full_marks, float) and full_marks.is_integer():
-                            full_marks = int(full_marks)
+                        for t_name_raw, group in grouped_quiz:
+                            t_name = str(t_name_raw).strip()
                             
-                        quiz_lines.append(f"・【{t_name} {chap}】: {score}/{full_marks}点")
-                
+                            # 満点を取得
+                            full_marks = 100 
+                            for key_in_dict, data_in_dict in quiz_master.items():
+                                if t_name in key_in_dict:
+                                    full_marks = data_in_dict.get("full_marks", 100)
+                                    break 
+                            if isinstance(full_marks, float) and full_marks.is_integer():
+                                full_marks = int(full_marks)
+                                
+                            # テキスト名のヘッダーを追加
+                            quiz_lines.append(f"■ {t_name}（満点:{full_marks}点）")
+                            
+                            # そのテキストの点数一覧を作成
+                            score_items = []
+                            for _, row in group.iterrows():
+                                chap_raw = row.get('単元', '不明')
+                                score = row.get('点数', '不明')
+                                
+                                try:
+                                    chap = str(int(float(chap_raw)))
+                                except Exception:
+                                    chap = str(chap_raw).strip()
+                                    if chap.endswith('.0'): chap = chap[:-2]
+                                
+                                # スマホで1行に収まるように少し短くする
+                                score_items.append(f"第{chap}回:{score}点")
+                            
+                            # 2つずつペアにして「｜」で繋ぎ、改行して追加していく
+                            for i in range(0, len(score_items), 2):
+                                if i + 1 < len(score_items):
+                                    # 2列揃った場合
+                                    quiz_lines.append(f" {score_items[i]} ｜ {score_items[i+1]}")
+                                else:
+                                    # 奇数で1つ余った場合
+                                    quiz_lines.append(f" {score_items[i]}")
+
                 quiz_result_text = "\n".join(quiz_lines) if quiz_lines else "今月の小テスト実施記録はありません。"
 
                 dynamic_praise = ""
@@ -200,12 +224,11 @@ def render_monthly_visual_report_tab():
                     dynamic_praise = "毎回の宿題も非常に高い達成率でこなせており、素晴らしい学習習慣が身についています！"
                 elif total_ss_minutes >= 600:
                     dynamic_praise = "今月は自習にも積極的に取り組むことができ、素晴らしい努力の成果が出ています！"
-                elif quiz_lines:
+                elif has_quiz:
                     dynamic_praise = "小テストにもコツコツと取り組み、着実に基礎力を固めることができました！"
                 else:
                     dynamic_praise = "日々の授業に真剣に取り組み、一歩ずつ着実に前進しています！"
 
-                # 🌟 NEW: アンケートの文面ブロックを作成
                 survey_block = ""
                 if survey_url.strip():
                     survey_block = f"""
