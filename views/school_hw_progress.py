@@ -68,40 +68,47 @@ def render_hw_progress(df_sw_logs, master_dict):
                 
                 for chap_info in chapters:
                     c_name = chap_info["chapter"]
+                    c_unit = chap_info.get("unit_name", "")
+                    
+                    # 🌟 変更: 「章名」と「単元名」を合体させて列名（ヘッダー）にする
+                    if c_unit and c_unit not in ["", "nan"]:
+                        full_chap_name = f"{c_name}\n({c_unit})"
+                    else:
+                        full_chap_name = c_name
+                        
                     c_start = chap_info["start"]
                     c_end = chap_info["end"]
                     
-                    # その章の全ページのクリア回数リストを取得
                     counts = [student_pages.get(p, 0) for p in range(c_start, c_end + 1)]
                     if not counts:
-                        row_data[c_name] = "✖"
+                        row_data[full_chap_name] = "✖"
                         continue
                         
-                    min_c = min(counts) # 章の中で一番やっていないページの回数
-                    max_c = max(counts) # 章の中で一番やっているページの回数
+                    min_c = min(counts) 
+                    max_c = max(counts) 
                     
-                    # 🌟 判定ロジック
                     if min_c >= 3: mark = "👑"
                     elif min_c == 2: mark = "◎"
                     elif min_c == 1: mark = "〇"
                     elif max_c > 0: mark = "△"
                     else: mark = "✖"
                     
-                    row_data[c_name] = mark
+                    row_data[full_chap_name] = mark
                     if min_c >= 1: completed_chap += 1
                     
-                    # 🚨 アラート判定: この章が完了しておらず、かつ、これより先のページをやっている場合
+                    # アラート判定
                     if mark in ["△", "✖"] and max_done_page > c_end:
                         missing_pages = [p for p in range(c_start, c_end + 1) if student_pages.get(p, 0) == 0]
                         if missing_pages:
+                            # 🌟 アラート表示用にも単元名を含める
+                            alert_chap_name = f"{c_name} ({c_unit})" if c_unit and c_unit not in ["", "nan"] else c_name
                             alerts.append({
                                 "生徒名": s_name,
                                 "テキスト名": t_name,
-                                "章": c_name,
+                                "章・単元": alert_chap_name,
                                 "飛ばしているページ": group_consecutive_pages(missing_pages)
                             })
                             
-                # 進捗率を追加
                 row_data["進捗率"] = f"{int((completed_chap / total_chap) * 100)}%" if total_chap > 0 else "0%"
                 matrix_data.append(row_data)
                 
@@ -133,7 +140,6 @@ def render_hw_progress(df_sw_logs, master_dict):
     if selected_text:
         df_show = results[selected_text]
         
-        # 背景色の設定
         def style_matrix(val):
             if val == "👑": return "background-color: #fffacd; color: #000; font-weight: bold;"
             if val == "◎": return "background-color: #c6efce; color: #006100;"
@@ -149,7 +155,6 @@ def render_hw_progress(df_sw_logs, master_dict):
             
         st.dataframe(styled_df, use_container_width=True)
         
-        # Excelダウンロード用バッファ
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
             styled_df.to_excel(writer, sheet_name="進捗マトリックス", index=False)
