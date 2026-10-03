@@ -72,7 +72,7 @@ def render_hw_progress(df_sw_logs, master_dict):
                     
                     # 🌟 変更: 「章名」と「単元名」を合体させて列名（ヘッダー）にする
                     if c_unit and c_unit not in ["", "nan"]:
-                        full_chap_name = f"{c_name}\n({c_unit})"
+                        full_chap_name = f"{c_name}:\n{c_unit}"
                     else:
                         full_chap_name = c_name
                         
