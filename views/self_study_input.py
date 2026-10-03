@@ -100,7 +100,7 @@ def render_self_study_input_page():
                         # 🌟 grade_category（学年）も渡すように変更！
                         ok, msg = robust_api_call(
                             save_self_study_record,
-                            date=rec["date"], 
+                            date=formatted_date_str,
                             name=pure_name, 
                             start_time=rec["start"], 
                             end_time=rec["end"], 
