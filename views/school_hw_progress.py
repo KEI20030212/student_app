@@ -112,7 +112,7 @@ def render_hw_progress(df_sw_logs, master_dict):
     # 🚨 アラートの表示
     # ==========================================
     if alerts:
-        with st.expander("🚨 ページ飛ばしアラート（要確認！）", expanded=True):
+        with st.expander("🚨 ページ飛ばしアラート（要確認！）", expanded=False):
             st.error("以下の生徒は、先のページに進んでいるにも関わらず、途中のページが未実施になっています。")
             df_alerts = pd.DataFrame(alerts)
             st.dataframe(df_alerts, use_container_width=True)
