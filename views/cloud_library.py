@@ -7,7 +7,7 @@ from utils.g_drive import (
     upload_library_file, 
     list_library_files,
     list_library_folders,
-    delete_library_file  # 🌟 NEW: 削除用の関数をインポート
+    delete_library_file  
 )
 from utils.api_guard import robust_api_call
 
@@ -40,7 +40,7 @@ def render_cloud_library_page():
     st.divider()
 
     # ==========================================
-    # 🌟 共通のファイル表示＆削除処理関数
+    # 🌟 共通のファイル表示＆削除処理関数（安全ガード付き！）
     # ==========================================
     def display_files(files_list):
         if not files_list:
@@ -51,10 +51,9 @@ def render_cloud_library_page():
         
         for file in files_list:
             file_id = file.get('id')
-            file_name = file.get('name')
+            file_name = file.get('name', '無題のファイル')
             
             with st.container(border=True):
-                # 🌟 管理者かどうかでカラムの分割幅を変える
                 if is_admin:
                     c1, c2, c3 = st.columns([6, 2, 2])
                 else:
@@ -62,13 +61,15 @@ def render_cloud_library_page():
                 
                 c1.markdown(f"📄 **{file_name}**")
                 
+                # 🌟 修正ポイント：webViewLink が正しく存在するか安全にチェックする
                 link = file.get('webViewLink')
-                if link: 
+                if link and isinstance(link, str) and link.startswith("http"):
                     c2.link_button("👁️ 開く・印刷", link, use_container_width=True)
+                else:
+                    c2.caption("⚠️ リンク無効")
                 
-                # 🌟 管理者のみ削除ボタンを表示
+                # 管理者のみ削除ボタンを表示
                 if is_admin:
-                    # ボタンのkeyが重複しないようにfile_idを使う
                     if c3.button("🗑️ 削除", key=f"del_{file_id}", type="secondary", use_container_width=True):
                         with st.spinner(f"「{file_name}」を削除中..."):
                             success, msg = robust_api_call(delete_library_file, file_id, fallback_value=(False, "エラー"))
@@ -76,7 +77,7 @@ def render_cloud_library_page():
                             if success:
                                 st.success("✅ 削除（gomiフォルダへ移動）しました。")
                                 time.sleep(1)
-                                st.rerun() # 画面をリロードして一覧から消す
+                                st.rerun() 
                             else:
                                 st.error(f"削除に失敗しました: {msg}")
 
@@ -104,7 +105,7 @@ def render_cloud_library_page():
                     with st.spinner("書庫からPDFを探しています...🔍"):
                         files = robust_api_call(list_library_files, CAT_QUIZ, selected_quiz, selected_chapter, fallback_value=[])
                     
-                    display_files(files) # 🌟 共通関数で描画
+                    display_files(files) 
 
     with tab_exam:
         st.subheader("🏫 定期テストの過去問を探す")
@@ -122,7 +123,7 @@ def render_cloud_library_page():
                 with st.spinner("書庫からPDFを探しています...🔍"):
                     files = robust_api_call(list_library_files, CAT_EXAM, selected_school, selected_exam_chap, fallback_value=[])
                 
-                display_files(files) # 🌟 共通関数で描画
+                display_files(files) 
 
     # ==========================================
     # 📤 アップロードエリア（管理者専用）
