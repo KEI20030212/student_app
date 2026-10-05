@@ -1,3 +1,5 @@
+# views/salary_dashboard.py
+
 import streamlit as st
 import pandas as pd
 import math
@@ -25,7 +27,7 @@ def fetch_instructor_master_cached():
     if df.empty or "講師名" not in df.columns:
         return pd.DataFrame(columns=["講師名", "1:1単価", "1:2単価", "1:3単価", "交通費_田端新町校", "交通費_東十条駅前校", "役職手当"])
     
-    # 🌟 既存の「交通費」列しかない場合、新しい校舎別列を追加してデータを引き継ぐ（後方互換性）
+    # 後方互換性
     if "交通費_田端新町校" not in df.columns:
         df["交通費_田端新町校"] = df.get("交通費", 0)
     if "交通費_東十条駅前校" not in df.columns:
@@ -38,9 +40,6 @@ def render_salary_dashboard_page():
 
     df_instructors = fetch_instructor_master_cached().copy()
 
-    # --------------------------------------------------------
-    # 操作パネル（一括データ取得＆ゆらぎ吸収）
-    # --------------------------------------------------------
     if 'toast_msg' in st.session_state:
         st.toast(st.session_state['toast_msg'], icon="✨")
         del st.session_state['toast_msg']
@@ -75,9 +74,6 @@ def render_salary_dashboard_page():
 
     tab_calc, tab_master = st.tabs(["📊 給与計算・明細発行", "👨‍🏫 講師単価・設定変更"])
 
-    # ==========================================
-    # Tab 1: 給与計算・明細発行
-    # ==========================================
     with tab_calc:
         if df_all.empty or selected_month == "データなし":
             st.info("集計対象のデータがありません。")
@@ -131,7 +127,6 @@ def render_salary_dashboard_page():
                         p12 = safe_int(t_row.get('1:2単価', 1800), 1800)
                         p13 = safe_int(t_row.get('1:3単価', 2000), 2000)
                         
-                        # 🌟 NEW: 計算中の校舎に応じた交通費を動的に取得する
                         trans_key = f"交通費_{branch}"
                         trans = safe_int(t_row.get(trans_key, t_row.get('交通費', 0)), 0)
                         
@@ -159,7 +154,11 @@ def render_salary_dashboard_page():
                         "役職手当 (円)": int(allowance), 
                         "出勤日数": working_days, 
                         "交通費合計 (円)": int(transport_total), 
-                        "💰 最終支給額 (円)": int(final_salary)
+                        "💰 最終支給額 (円)": int(final_salary),
+                        # 裏データ
+                        "単価_11": p11, "単価_12": p12, "単価_13": p13, 
+                        "単価_交_田端": safe_int(t_row.get('交通費_田端新町校', 0)) if not t_row_df.empty else 0,
+                        "単価_交_東十条": safe_int(t_row.get('交通費_東十条駅前校', 0)) if not t_row_df.empty else 0,
                     })
 
             if summary_list:
@@ -167,62 +166,82 @@ def render_salary_dashboard_page():
                 st.subheader(f"📊 {selected_month} の給与一覧")
                 
                 b_tabs = st.tabs(["🏫 田端新町校", "🏫 東十条駅前校", "🏢 全体データ(合算)"])
+                
+                display_cols = [c for c in df_summary.columns if not c.startswith("単価_")]
+                
                 with b_tabs[0]:
-                    df_t = df_summary[df_summary["🏫 校舎"] == "田端新町校"]
+                    df_t = df_summary[df_summary["🏫 校舎"] == "田端新町校"][display_cols]
                     st.dataframe(df_t, hide_index=True, use_container_width=True)
                 with b_tabs[1]:
-                    df_h = df_summary[df_summary["🏫 校舎"] == "東十条駅前校"]
+                    df_h = df_summary[df_summary["🏫 校舎"] == "東十条駅前校"][display_cols]
                     st.dataframe(df_h, hide_index=True, use_container_width=True)
                 with b_tabs[2]:
-                    df_total = df_summary.groupby("👨‍🏫 担当講師", as_index=False).agg({
-                        "合計コマ数": "sum",
-                        "1:1コマ": "sum", 
-                        "1:2コマ": "sum", 
-                        "1:3コマ": "sum", 
-                        "授業給 (円)": "sum",
-                        "出勤日数": "sum",
-                        "交通費合計 (円)": "sum", 
-                        "💰 最終支給額 (円)": "sum"
+                    # 画面表示用の合算処理
+                    df_total_disp = df_summary.groupby("👨‍🏫 担当講師", as_index=False).agg({
+                        "合計コマ数": "sum", "1:1コマ": "sum", "1:2コマ": "sum", "1:3コマ": "sum", 
+                        "授業給 (円)": "sum", "出勤日数": "sum", "交通費合計 (円)": "sum", "💰 最終支給額 (円)": "sum"
                     })
                     
-                    # 役職手当はマスタから引き直して1回だけ足す（二重加算防止）
                     allowance_dict = df_instructors.set_index("講師名")["役職手当"].to_dict()
                     def get_allowance(name):
                         try: return int(float(allowance_dict.get(name, 0)))
                         except: return 0
                         
-                    df_total["役職手当 (円)"] = df_total["👨‍🏫 担当講師"].apply(get_allowance)
-                    df_total["💰 最終支給額 (円)"] = df_total["授業給 (円)"] + df_total["交通費合計 (円)"] + df_total["役職手当 (円)"]
+                    df_total_disp["役職手当 (円)"] = df_total_disp["👨‍🏫 担当講師"].apply(get_allowance)
+                    df_total_disp["💰 最終支給額 (円)"] = df_total_disp["授業給 (円)"] + df_total_disp["交通費合計 (円)"] + df_total_disp["役職手当 (円)"]
 
                     cols_order = ["👨‍🏫 担当講師", "合計コマ数", "1:1コマ", "1:2コマ", "1:3コマ", "授業給 (円)", "役職手当 (円)", "出勤日数", "交通費合計 (円)", "💰 最終支給額 (円)"]
-                    df_total = df_total[cols_order]
-
-                    st.dataframe(df_total, hide_index=True, use_container_width=True)
+                    df_total_disp = df_total_disp[cols_order]
+                    st.dataframe(df_total_disp, hide_index=True, use_container_width=True)
 
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("📦 全員分の明細をZIP作成", use_container_width=True):
+                        # ==========================================
+                        # 🌟 PDF用の「名寄せ（合算）処理」を実行！
+                        # ==========================================
+                        grouped_pdf_data = {}
+                        
+                        for row in summary_list:
+                            t_name = row["👨‍🏫 担当講師"]
+                            if t_name not in grouped_pdf_data:
+                                grouped_pdf_data[t_name] = {
+                                    "講師名": t_name,
+                                    "単価_11": row["単価_11"], "単価_12": row["単価_12"], "単価_13": row["単価_13"],
+                                    "単価_交_田端": row["単価_交_田端"], "単価_交_東十条": row["単価_交_東十条"],
+                                    "役職手当": row["役職手当 (円)"], # 手当は二重加算しないように1回だけ保持
+                                    "交通費合計": 0,
+                                    "田端": {"11": 0, "12": 0, "13": 0, "days": 0},
+                                    "東十条": {"11": 0, "12": 0, "13": 0, "days": 0}
+                                }
+                            
+                            b_key = "田端" if row["🏫 校舎"] == "田端新町校" else "東十条"
+                            grouped_pdf_data[t_name][b_key]["11"] += row["1:1コマ"]
+                            grouped_pdf_data[t_name][b_key]["12"] += row["1:2コマ"]
+                            grouped_pdf_data[t_name][b_key]["13"] += row["1:3コマ"]
+                            grouped_pdf_data[t_name][b_key]["days"] += row["出勤日数"]
+                            
+                            grouped_pdf_data[t_name]["交通費合計"] += row["交通費合計 (円)"]
+
+                        # ZIPファイルの作成
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                            for row_data in summary_list:
-                                pdf_bytes = generate_payslip_pdf(row_data, selected_month)
-                                zip_file.writestr(f"給与明細_{selected_month}_{row_data['🏫 校舎']}_{row_data['👨‍🏫 担当講師']}.pdf", pdf_bytes)
+                            for pdf_dict in grouped_pdf_data.values():
+                                pdf_bytes = generate_payslip_pdf(pdf_dict, selected_month)
+                                zip_file.writestr(f"給与明細_{selected_month}_{pdf_dict['講師名']}.pdf", pdf_bytes)
+                                
                         st.download_button("📥 ZIPをダウンロード", zip_buffer.getvalue(), f"{selected_month}_給与明細.zip", "application/zip", type="primary", use_container_width=True)
                 
                 with c2:
                     if st.button(f"🚀 {selected_month} の給与を公開する", use_container_width=True):
                         with st.spinner("送信中..."):
-                            success = robust_api_call(publish_salary_data, selected_month, df_summary, fallback_value=False)
+                            success = robust_api_call(publish_salary_data, selected_month, df_summary[display_cols], fallback_value=False)
                             if success: st.success("✅ 公開しました！")
                             else: st.error("⚠️ 送信に失敗しました。")
 
-    # ==========================================
-    # Tab 2: 講師単価・設定変更
-    # ==========================================
     with tab_master:
         st.subheader("⚙️ 講師マスタの設定変更")
         
-        st.markdown("##### 👤 講師ごとの個別設定")
         target_teacher = st.selectbox("設定を変更する講師を選択してください", ["選択してください"] + df_instructors["講師名"].tolist())
         
         if target_teacher != "選択してください":
@@ -235,7 +254,6 @@ def render_salary_dashboard_page():
                     new_12 = st.number_input("1:2 単価", value=int(current_vals.get('1:2単価', 1800)), step=100)
                     new_13 = st.number_input("1:3 単価", value=int(current_vals.get('1:3単価', 2000)), step=100)
                 with col2:
-                    # 🌟 NEW: 交通費の入力欄を校舎ごとに分割
                     new_trans_t = st.number_input("田端新町校 交通費/日", value=int(current_vals.get('交通費_田端新町校', current_vals.get('交通費', 0))), step=10)
                     new_trans_h = st.number_input("東十条駅前校 交通費/日", value=int(current_vals.get('交通費_東十条駅前校', current_vals.get('交通費', 0))), step=10)
                     new_allowance = st.number_input("役職手当", value=int(current_vals.get('役職手当', 0)), step=1000)
@@ -256,9 +274,5 @@ def render_salary_dashboard_page():
                             st.rerun()
         
         st.divider()
-        
         st.markdown("##### 📋 講師設定一覧（確認用）")
         st.dataframe(df_instructors, hide_index=True, use_container_width=True)
-        
-        with st.expander("➕ 新しい講師を登録する（アカウント連動）"):
-            st.info("💡 **一元管理へのアップデート**\n\n「名前の入力ミス」や「データの二重管理」を完璧に防ぐため、新しい講師の登録は左メニューの **「⚙️ アカウント・システム設定」** から行ってください。\n\nそちらでアカウントを作成すると、自動的にこの講師マスタにも連動して、初期給与設定の枠が自動生成されます！")
