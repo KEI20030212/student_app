@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+import requests
 from utils.g_sheets import get_quiz_master_dict
 from utils.g_drive import (
     upload_library_file, 
@@ -14,18 +15,60 @@ from utils.api_guard import robust_api_call
 CAT_QUIZ = "小テスト・確認テスト"
 CAT_EXAM = "定期テスト過去問"
 
+# ==========================================
+# 🚀 超高速化のためのキャッシュ関数（Safariブロック対策）
+# ==========================================
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_get_quiz_master():
+    return robust_api_call(get_quiz_master_dict, fallback_value={})
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_list_library_folders(cat, sub_cat):
+    return robust_api_call(list_library_folders, cat, sub_cat, fallback_value=[])
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_list_library_files(cat, sub_cat, chap):
+    return robust_api_call(list_library_files, cat, sub_cat, chap, fallback_value=[])
+
+# ==========================================
+# 🧠 ウィルススキャン警告を突破して本物のファイルを取得する関数
+# ==========================================
+def download_gdrive_file_safely(file_id):
+    url = "https://drive.google.com/uc?export=download"
+    session = requests.Session()
+    res = session.get(url, params={'id': file_id}, stream=True)
+    
+    token = None
+    for key, value in res.cookies.items():
+        if key.startswith('download_warning'):
+            token = value
+            break
+    
+    if token:
+        res = session.get(url, params={'id': file_id, 'confirm': token}, stream=True)
+        
+    return res.content
+
 def render_cloud_library_page():
     st.header("📚 教材クラウド書庫")
-    st.write("塾の公式プリント（小テスト、過去問など）を1秒で検索・ダウンロードできる共有書庫です。")
+    st.write("塾の公式プリント（小テスト、過去問など）を検索・閲覧・保存できる共有書庫です。")
+    
+    st.info("💡 **【スマホ・PC共通のご利用方法】**\n"
+            "「📖 プレビューを開く」で内容を確認できます。\n"
+            "保存・印刷する場合は、必ずファイルの横にある **「📥 取得する」 ➡ 「💾 保存する」** ボタンを使用してください。（※Googleにログインしていなくても保存できます！）")
     
     user_role = str(st.session_state.get('role', st.session_state.get('user_role', 'guest'))).lower()
     is_admin = user_role in ['admin', 'owner', 'am']
     
     if 'lib_upload_key' not in st.session_state:
         st.session_state.lib_upload_key = 0
+        
+    # 🌟 NEW: ダウンロード用のデータを保持する箱
+    if 'prepared_files' not in st.session_state:
+        st.session_state.prepared_files = {}
     
     with st.spinner("書庫のインデックスを読み込み中..."):
-        quiz_details = robust_api_call(get_quiz_master_dict, fallback_value={})
+        quiz_details = cached_get_quiz_master()
         quiz_names = []
         for key in quiz_details.keys():
             if "_" in key:
@@ -40,7 +83,7 @@ def render_cloud_library_page():
     st.divider()
 
     # ==========================================
-    # 🌟 共通のファイル表示＆削除処理関数（安全ガード付き！）
+    # 🌟 共通のファイル表示＆削除処理関数
     # ==========================================
     def display_files(files_list):
         if not files_list:
@@ -55,27 +98,62 @@ def render_cloud_library_page():
             
             with st.container(border=True):
                 if is_admin:
-                    c1, c2, c3 = st.columns([6, 2, 2])
+                    c1, c2, c3 = st.columns([5, 3, 2])
                 else:
-                    c1, c2 = st.columns([8, 2])
+                    c1, c2 = st.columns([7, 3])
                 
                 c1.markdown(f"📄 **{file_name}**")
                 
-                # 🌟 修正ポイント：webViewLink が正しく存在するか安全にチェックする
-                link = file.get('webViewLink')
-                if link and isinstance(link, str) and link.startswith("http"):
-                    c2.link_button("👁️ 開く・印刷", link, use_container_width=True)
+                if file_id:
+                    with st.expander("📖 プレビューを開く"):
+                        embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                        st.markdown(
+                            f'<iframe src="{embed_url}" width="100%" height="400" style="border: none; border-radius: 8px;"></iframe>',
+                            unsafe_allow_html=True
+                        )
+                        st.caption("⚠️ プレビュー画面内のダウンロードボタンは、ログインしていないと白紙になります。保存は下の青いボタンから行ってください。")
+                    
+                    # 🌟 究極のダウンロードボタン！システム経由で本物のPDFを渡す
+                    if file_id in st.session_state.prepared_files:
+                        file_bytes = st.session_state.prepared_files[file_id]
+                        
+                        ext = os.path.splitext(file_name)[1].lower()
+                        safe_file_name = file_name + ".pdf" if not ext else file_name
+                        
+                        # システムから渡すため、ログイン不要で誰でもダウンロードできます！
+                        c2.download_button(
+                            label="💾 保存する", 
+                            data=file_bytes, 
+                            file_name=safe_file_name, 
+                            mime="application/pdf", 
+                            type="primary",
+                            use_container_width=True,
+                            key=f"dl_{file_id}"
+                        )
+                    else:
+                        if c2.button("📥 取得する", key=f"prep_{file_id}", use_container_width=True):
+                            with st.spinner("システム経由でファイルを抽出中..."):
+                                try:
+                                    # システムが代わりにGoogleドライブからデータを引っこ抜く
+                                    file_bytes = download_gdrive_file_safely(file_id)
+                                    
+                                    if not file_bytes.startswith(b'<!DOCTYPE html>') and not file_bytes.startswith(b'<html'):
+                                        st.session_state.prepared_files[file_id] = file_bytes
+                                        st.rerun() 
+                                    else:
+                                        st.error("⚠️ 権限エラー：Googleドライブの共有設定が「リンクを知っている全員（閲覧者）」になっていない可能性があります。")
+                                except Exception as e:
+                                    st.error(f"取得エラー: {e}")
                 else:
                     c2.caption("⚠️ リンク無効")
                 
-                # 管理者のみ削除ボタンを表示
                 if is_admin:
                     if c3.button("🗑️ 削除", key=f"del_{file_id}", type="secondary", use_container_width=True):
                         with st.spinner(f"「{file_name}」を削除中..."):
                             success, msg = robust_api_call(delete_library_file, file_id, fallback_value=(False, "エラー"))
-                            
                             if success:
-                                st.success("✅ 削除（gomiフォルダへ移動）しました。")
+                                st.success("✅ 削除しました。")
+                                st.cache_data.clear() 
                                 time.sleep(1)
                                 st.rerun() 
                             else:
@@ -92,37 +170,27 @@ def render_cloud_library_page():
             st.warning("設定シートから小テスト名が取得できません。")
         else:
             selected_quiz = st.selectbox("📚 テキスト・テスト名を選択", ["-- 選択してください --"] + quiz_names, key="sel_q_txt")
-            
             if selected_quiz != "-- 選択してください --":
-                with st.spinner("単元・章のフォルダを探しています..."):
-                    chapter_folders = robust_api_call(list_library_folders, CAT_QUIZ, selected_quiz, fallback_value=[])
-                
+                # キャッシュから一瞬で取得
+                chapter_folders = cached_list_library_folders(CAT_QUIZ, selected_quiz)
                 selected_chapter = None
                 if chapter_folders:
                     selected_chapter = st.selectbox("📖 単元・章を選択", ["-- 選択してください --", "-- 直下のファイル --"] + chapter_folders, key="sel_q_chap")
-                
                 if not chapter_folders or (chapter_folders and selected_chapter and selected_chapter != "-- 選択してください --"):
-                    with st.spinner("書庫からPDFを探しています...🔍"):
-                        files = robust_api_call(list_library_files, CAT_QUIZ, selected_quiz, selected_chapter, fallback_value=[])
-                    
+                    # キャッシュから一瞬で取得
+                    files = cached_list_library_files(CAT_QUIZ, selected_quiz, selected_chapter)
                     display_files(files) 
 
     with tab_exam:
         st.subheader("🏫 定期テストの過去問を探す")
         selected_school = st.selectbox("🏫 学校名を選択", ["-- 選択してください --"] + school_names, key="sel_e_sch")
-        
         if selected_school != "-- 選択してください --":
-            with st.spinner("年度・学期のフォルダを探しています..."):
-                exam_folders = robust_api_call(list_library_folders, CAT_EXAM, selected_school, fallback_value=[])
-            
+            exam_folders = cached_list_library_folders(CAT_EXAM, selected_school)
             selected_exam_chap = None
             if exam_folders:
                 selected_exam_chap = st.selectbox("📅 年度・テスト時期を選択", ["-- 選択してください --", "-- 直下のファイル --"] + exam_folders, key="sel_e_chap")
-            
             if not exam_folders or (exam_folders and selected_exam_chap and selected_exam_chap != "-- 選択してください --"):
-                with st.spinner("書庫からPDFを探しています...🔍"):
-                    files = robust_api_call(list_library_files, CAT_EXAM, selected_school, selected_exam_chap, fallback_value=[])
-                
+                files = cached_list_library_files(CAT_EXAM, selected_school, selected_exam_chap)
                 display_files(files) 
 
     # ==========================================
@@ -131,94 +199,48 @@ def render_cloud_library_page():
     if is_admin:
         st.divider()
         st.markdown("### 🔐 【管理者専用】新しい教材を登録する")
-        
         with st.expander("➕ 教材をクラウド書庫にアップロード", expanded=False):
             reset_k = st.session_state.lib_upload_key
-            
             u_cat = st.selectbox("📂 登録するカテゴリー", [CAT_QUIZ, CAT_EXAM], key=f"u_cat_{reset_k}")
-            u_sub_cat = st.text_input("🏷️ テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校", key=f"u_sub_cat_{reset_k}")
-            
-            uploaded_files = st.file_uploader(
-                "📄 アップロードするPDF（複数選択できます！）", 
-                type=["pdf", "png", "jpg", "jpeg"], 
-                accept_multiple_files=True,
-                key=f"u_files_{reset_k}"
-            )
-            
+            u_sub_cat = st.text_input("🏷 テキスト名 または 学校名（必須）", placeholder="例：ターゲット1200 / 田端中学校", key=f"u_sub_cat_{reset_k}")
+            uploaded_files = st.file_uploader("📄 アップロードするPDF（複数選択可）", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True, key=f"u_files_{reset_k}")
             if uploaded_files:
-                st.markdown("#### ⚙️ 各ファイルの設定（保存先フォルダ・ファイル名）")
-                st.info("💡 単元・章の欄に入力した名前のフォルダが自動で作成されます！")
-                
+                st.markdown("#### ⚙️ 各ファイルの設定")
                 file_settings = []
                 for i, file_obj in enumerate(uploaded_files):
                     with st.container(border=True):
                         st.markdown(f"**📄 {file_obj.name}**")
                         c_chap, c_name = st.columns(2)
-                        
                         default_chap = os.path.splitext(file_obj.name)[0]
                         chap_val = c_chap.text_input("📖 単元・章（フォルダ名）", value=default_chap, key=f"chap_{reset_k}_{i}")
                         name_val = c_name.text_input("📝 保存するファイル名", value=file_obj.name, key=f"name_{reset_k}_{i}")
-                        
-                        file_settings.append({
-                            "obj": file_obj,
-                            "chap": chap_val,
-                            "name": name_val
-                        })
+                        file_settings.append({"obj": file_obj, "chap": chap_val, "name": name_val})
                 
-                submit_upload = st.button("🚀 この設定で教材を一括登録する", type="primary", use_container_width=True)
-                
-                if submit_upload:
+                if st.button("🚀 この設定で教材を一括登録する", type="primary", use_container_width=True):
                     if not u_sub_cat:
                         st.error("⚠️ テキスト名 または 学校名 を入力してください。")
                     else:
                         progress_bar = st.progress(0)
                         status_text = st.empty()
-                        
                         success_count = 0
                         error_messages = []
-                        
                         for i, setting in enumerate(file_settings):
-                            f_obj = setting["obj"]
-                            f_chap = setting["chap"]
-                            f_name = setting["name"]
-                            
-                            status_text.text(f"アップロード中... ({i+1}/{len(file_settings)}): {f_name}")
-                            
-                            file_bytes = f_obj.getvalue()
-                            mime_type = f_obj.type
-                            
-                            success, result = robust_api_call(
-                                upload_library_file,
-                                u_cat,
-                                u_sub_cat,
-                                f_chap, 
-                                f_name, 
-                                file_bytes,
-                                mime_type,
-                                fallback_value=(False, "APIエラー")
-                            )
-                            
-                            if success:
-                                success_count += 1
-                            else:
-                                error_messages.append(f"{f_name}: {result}")
-                                
+                            status_text.text(f"アップロード中... ({i+1}/{len(file_settings)}): {setting['name']}")
+                            success, result = robust_api_call(upload_library_file, u_cat, u_sub_cat, setting["chap"], setting["name"], setting["obj"].getvalue(), setting["obj"].type, fallback_value=(False, "APIエラー"))
+                            if success: success_count += 1
+                            else: error_messages.append(f"{setting['name']}: {result}")
                             progress_bar.progress((i + 1) / len(file_settings))
                         
                         status_text.empty()
-                        
                         if success_count == len(file_settings):
-                            st.success(f"🎉 【{u_sub_cat}】に {success_count}件 のファイルを登録しました！")
+                            st.success(f"🎉 【{u_sub_cat}】に {success_count}件 登録しました！")
+                            st.cache_data.clear() 
                             time.sleep(2)
-                            
                             st.session_state.lib_upload_key += 1 
                             st.rerun()
-                            
                         elif success_count > 0:
-                            st.warning(f"⚠️ {success_count}件 登録しましたが、一部失敗しました。")
-                            for err in error_messages:
-                                st.error(err)
+                            st.warning(f"⚠️ {success_count}件 登録完了（一部失敗）")
+                            for err in error_messages: st.error(err)
                         else:
-                            st.error("すべてのアップロードに失敗しました。")
-                            for err in error_messages:
-                                st.error(err)
+                            st.error("アップロード失敗")
+                            for err in error_messages: st.error(err)
