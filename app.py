@@ -13,7 +13,6 @@ from views.analysis import render_analysis_page#改良済
 from views.dashboard_combined import render_combined_dashboard_page#改良済
 from views.quiz_management import render_quiz_management_page#改良済
 from views.school_homework import render_school_homework_page#改良済
-from views.message_sender import render_message_sender_page#変更なし
 from views.line_report import render_line_report_page#改良済
 from views.search_page import render_search_page#改良済
 from views.analytics_dashboard import render_analytics_dashboard_page#改良済
@@ -99,7 +98,6 @@ def main():
         "💯 小テスト管理センター",
         "🔍 全生徒の過去ログ検索",
         "🎒 学校課題管理",
-        "💌 メッセージ送信"
     ]
 
     if st.session_state['role'] in ['admin', 'owner', 'am', 'head_teacher']:
@@ -141,7 +139,6 @@ def main():
     elif page == "📈 講師分析ダッシュボード": render_analytics_dashboard_page()
     elif page == "💴 自分の給与確認": render_my_salary_page()
     elif page == "💰 財務・請求ダッシュボード": render_finance_integrated_page()
-    elif page == "💌 メッセージ送信": render_message_sender_page()
     elif page == "⚙️ アカウント・システム設定": render_account_manager_page()
 
 if __name__ == "__main__":
