@@ -133,7 +133,21 @@ def render_self_study_dashboard():
     if not GAS_URL or GAS_URL.startswith("ここ") or not target_sheet_id or target_sheet_id.startswith("ここ"):
         st.warning(f"⚠️ 【{target_branch} - {target_grade}】用の設定が未完了です。コードのURLまたはスプレッドシートIDを書き換えてください。")
         return
-        
+
+    # 🌟 NEW: 画面遷移を防ぐ安全な画像ダウンロードボタンを描画する関数
+    def display_safe_image_download_link(img_bytes, filename, color="#1E90FF"):
+        b64_img = base64.b64encode(img_bytes).decode('utf-8')
+        html_button = f'''
+        <a href="data:image/png;base64,{b64_img}" download="{filename}" 
+           style="display: block; text-align: center; padding: 10px 15px; background-color: {color}; 
+                  color: white; text-decoration: none; border-radius: 8px; font-weight: bold; 
+                  font-family: sans-serif; font-size: 16px; margin-top: 10px; transition: 0.3s;
+                  border: 1px solid #104E8B;">
+            📥 このグラフ画像をダウンロードする（PNG形式）
+        </a>
+        '''
+        st.markdown(html_button, unsafe_allow_html=True)
+
     if st.button(f"🚀 【{target_branch} - {target_grade}】の {selected_month}月 のグラフ画像を取得する", type="primary", use_container_width=True):
         
         # 🌟 処理1：スプレッドシートの年月を書き換える
@@ -171,14 +185,10 @@ def render_self_study_dashboard():
                         with st.container(border=True):
                             st.image(image_bytes, use_container_width=True)
                         
-                        st.download_button(
-                            label=f"📥 このグラフ画像をダウンロードする（PNG形式）",
-                            data=image_bytes,
-                            file_name=f"学習時間グラフ_{target_branch}_{target_grade}_{selected_year}年{selected_month}月.png",
-                            mime="image/png",
-                            type="primary",
-                            use_container_width=True
-                        )
+                        # 🌟 修正ポイント：Streamlitの純正ボタンをやめ、画面遷移しないHTMLリンク化
+                        safe_file_name = f"学習時間グラフ_{target_branch}_{target_grade}_{selected_year}年{selected_month}月.png"
+                        display_safe_image_download_link(image_bytes, safe_file_name)
+                        
                 else:
                     st.error(f"通信エラーが発生しました。（ステータスコード: {response.status_code}）")
             except requests.exceptions.Timeout:
