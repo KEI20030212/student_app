@@ -11,7 +11,7 @@ def render_quiz_management_page():
     
     tab1, tab2, tab3, tab4 ,tab5 = st.tabs([
         "📸 小テスト・画像管理",
-        "📚 教材クラウド書庫",
+        "📚 教材書庫",
         "🖨️ 小テスト作成・印刷", 
         "🔤 単語テスト作成", 
         "📝 進捗＆習熟度マップ"

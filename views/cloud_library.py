@@ -50,7 +50,7 @@ def download_gdrive_file_safely(file_id):
     return res.content
 
 def render_cloud_library_page():
-    st.header("📚 教材クラウド書庫")
+    st.header("📚 教材書庫")
     st.write("塾の公式プリント（小テスト、過去問など）を検索・閲覧・保存できる共有書庫です。")
     
     st.info("💡 **【スマホ・PC共通のご利用方法】**\n"
