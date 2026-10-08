@@ -97,7 +97,9 @@ def render_self_study_input_page():
                     pure_name = ss_name.split(" - ")[1] if " - " in ss_name else ss_name
 
                     for idx, rec in enumerate(ss_records):
-                        # 🌟 grade_category（学年）も渡すように変更！
+                        # 🌟 修正ポイント: 保存前に日付を正しい文字列フォーマットに変換する！
+                        formatted_date_str = rec["date"].strftime('%Y/%m/%d')
+                        
                         ok, msg = robust_api_call(
                             save_self_study_record,
                             date=formatted_date_str,
