@@ -1,3 +1,5 @@
+# views/line_report_generate.py
+
 import streamlit as st
 import datetime
 import pandas as pd
@@ -7,7 +9,8 @@ from utils.g_sheets import (
     load_school_homework_data,
     get_sent_list,      
     update_sent_flag,
-    get_quiz_master_dict
+    get_quiz_master_dict,
+    get_all_accounts
 )
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
@@ -37,8 +40,26 @@ def render_report_generation_tab(can_use_report):
     with st.spinner(f"{date_str} の全データを解析中..."):
         df_all_logs = cached_get_all_logs()
         df_all_quizzes = cached_load_quiz_records()
-        df_hw = cached_load_hw_records() # ※現状未使用ですが将来の拡張用に保持
+        df_hw = cached_load_hw_records() 
         quiz_master = cached_get_quiz_master()
+        
+        # 🌟 管理者の名前（署名）を取得する処理
+        accounts_data = robust_api_call(get_all_accounts, fallback_value={})
+        admin_name = "教室長" # 見つからなかった場合のデフォルト値
+        
+        for account_id, info in accounts_data.items():
+            if str(info.get('権限', '')).lower() == 'admin':
+                # まずフルネームを取得（列名が「講師名」か「名前」か揺れを吸収）
+                raw_name = str(info.get('講師名', info.get('名前', '教室長'))).strip()
+                
+                # 🌟 スペース（全角・半角）で分割し、最初の部分（苗字）だけを取り出す
+                if ' ' in raw_name or ' ' in raw_name:
+                    # 全角スペースを半角に変換してから分割
+                    split_name = raw_name.replace(' ', ' ').split(' ')
+                    admin_name = split_name[0]
+                else:
+                    admin_name = raw_name
+                break
 
         if df_all_logs.empty or "APIエラー発生" in df_all_logs.columns:
             st.error("授業記録データの取得に失敗しました。")
@@ -175,10 +196,8 @@ def render_report_generation_tab(can_use_report):
                             chap_raw = row.get('単元', '不明')
                             score = row.get('点数', '不明')
                             
-                            # 余計な空白を消して綺麗にする
                             t_name = str(t_name_raw).strip()
                             
-                            # 単元名も「1.0」のようにならないように綺麗にする
                             try:
                                 chap = str(int(float(chap_raw)))
                             except Exception:
@@ -186,22 +205,16 @@ def render_report_generation_tab(can_use_report):
                                 if chap.endswith('.0'):
                                     chap = chap[:-2]
                             
-                            # 🌟 【ここが賢いポイント！】辞書の中を「テキスト名」で検索する！
-                            full_marks = 100 # 見つからなかった場合のデフォルト点数
+                            full_marks = 100 
                             
-                            # quiz_master（マスター辞書）の中を一つずつ確認する
                             for key_in_dict, data_in_dict in quiz_master.items():
-                                # もし辞書のキー（例: "英単語_1"）の中に、テキスト名（例: "英単語"）が含まれていたら
                                 if t_name in key_in_dict:
-                                    # その満点を取得して、探すのをやめる！
                                     full_marks = data_in_dict.get("full_marks", 100)
                                     break 
                             
-                            # 16.0 などの表示を防ぐため、整数の場合はint型（16）に変換
                             if isinstance(full_marks, float) and full_marks.is_integer():
                                 full_marks = int(full_marks)
                                 
-                            # リストに「〇〇/〇〇点」の形式で追加！
                             quiz_results_list.append(f"【{t_name} {chap}】: {score}/{full_marks}点")
                         folder_id = robust_api_call(get_or_create_student_folder, student_id, student_name, fallback_value=None)
                         if folder_id:
@@ -213,14 +226,15 @@ def render_report_generation_tab(can_use_report):
                 if quiz_results_list:
                     quiz_text = "\n・".join(quiz_results_list)
 
+                # 🌟 メールの一番下に、上で取得した admin_name を動的に埋め込む
                 if bucket_name == "体験授業":
                     advices_block = f"🗣️ 【本日の輝いていた点】\n" + "\n\n".join(advice_sections) + "\n\n" if advice_sections else ""
                     msgs_block = f"📢 【今後の課題・ご提案】\n" + "\n\n".join(parent_msg_sections) + "\n\n" if parent_msg_sections else ""
-                    line_message = f"保護者様\n\n本日は {student_name} さんの「体験授業」にお越しいただき、ありがとうございました！\n\n{classes_text}\n\n💯 【小テスト結果】\n・{quiz_text}\n\n{drive_url_line}{bring_text}{advices_block}{msgs_block}引き続きよろしくお願いいたします。\n槌屋"
+                    line_message = f"保護者様\n\n本日は {student_name} さんの「体験授業」にお越しいただき、ありがとうございました！\n\n{classes_text}\n\n💯 【小テスト結果】\n・{quiz_text}\n\n{drive_url_line}{bring_text}{advices_block}{msgs_block}引き続きよろしくお願いいたします。\n{admin_name}"
                 else:
                     advices_block = f"🗣️ 【アドバイス(褒めた点など)】\n" + "\n\n".join(advice_sections) + "\n\n" if advice_sections else ""
                     msgs_block = f"📢 【ご連絡事項】\n" + "\n\n".join(parent_msg_sections) + "\n\n" if parent_msg_sections else ""
-                    line_message = f"保護者様\n\nお世話になっております。本日の {student_name} さんの授業報告です。\n\n{classes_text}\n\n💯 【小テスト結果】\n・{quiz_text}\n\n{drive_url_line}{bring_text}{hw_text}{advices_block}{msgs_block}よろしくお願いいたします。\n槌屋"
+                    line_message = f"保護者様\n\nお世話になっております。本日の {student_name} さんの授業報告です。\n\n{classes_text}\n\n💯 【小テスト結果】\n・{quiz_text}\n\n{drive_url_line}{bring_text}{hw_text}{advices_block}{msgs_block}よろしくお願いいたします。\n{admin_name}"
 
                 checkbox_key = f"sent_{date_str}_{student_id}"
                 is_already_sent = str(student_id) in sent_id_list
