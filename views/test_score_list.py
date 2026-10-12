@@ -15,7 +15,7 @@ from utils.g_sheets import (
     get_quiz_master_dict,                
     load_quiz_records,
     get_textbook_master,
-    update_quiz_master_defaults  # 🌟 NEW: 追加した関数をインポート
+    update_quiz_master_defaults  
 )
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -238,6 +238,89 @@ def render_test_scores_list_page():
             if not selected_quizzes_for_map:
                 st.info("👆 表示したい小テストを選択してください。")
             else:
+                def sort_key(c):
+                    nums = re.findall(r'\d+', str(c))
+                    return int(nums[0]) if nums else 999
+                    
+                # 🌟 NEW: マスターデータを基に横軸を完全展開する関数
+                def fill_all_chapters(pivot_df, target_q_name):
+                    # 🐛 エラー対策：列名を強制的に文字列にして重複を防ぐ
+                    pivot_df.columns = [str(c) for c in pivot_df.columns]
+                    pivot_df = pivot_df.loc[:, ~pivot_df.columns.duplicated()].copy()
+                    
+                    t_master = textbook_master.get(target_q_name, {})
+                    if not t_master:
+                        return pivot_df 
+                        
+                    # マスターにある全単元のリストを作成
+                    all_chaps = [str(k) for k in t_master.keys()]
+                    
+                    # pivot_dfに存在しない単元列を追加（中身は空っぽ）
+                    for chap in all_chaps:
+                        if chap not in pivot_df.columns:
+                            pivot_df[chap] = ""
+                            
+                    # 並び替え（マスター順 ＋ マスターにない謎の単元は後ろ）
+                    sorted_cols = sorted(all_chaps, key=sort_key)
+                    other_cols = [c for c in pivot_df.columns if c not in all_chaps]
+                    final_cols = sorted_cols + sorted(other_cols, key=sort_key)
+                    
+                    return pivot_df[final_cols]
+
+                def style_pivot_dataframe(pivot_df, target_q_name):
+                    # 🌟 全単元を横軸に展開する
+                    pivot_df = fill_all_chapters(pivot_df, target_q_name)
+                    
+                    col_mapping = {}
+                    t_master = textbook_master.get(target_q_name, {}) 
+                    
+                    for col in pivot_df.columns:
+                        chap_str = str(col)
+                        chap_name = t_master.get(chap_str, "")
+                        if chap_name:
+                            col_mapping[col] = f"{chap_str}: {chap_name}"
+                        else:
+                            col_mapping[col] = f"第{chap_str}回"
+                            
+                    pivot_df = pivot_df.rename(columns=col_mapping)
+
+                    def add_icon(val):
+                        if pd.isna(val) or val == "": return ""
+                        
+                        full_m = 100
+                        matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{target_q_name}_")]
+                        if matched_marks:
+                            full_m = int(pd.Series(matched_marks).mode()[0])
+                                
+                        try:
+                            v = float(val)
+                            ratio = v / full_m if full_m > 0 else 0
+                            if ratio >= 1.0: return f"👑 {int(v)}"
+                            elif ratio >= 0.85: return f"🟢 {int(v)}"
+                            elif ratio >= 0.2: return f"🟡 {int(v)}"
+                            else: return f"🔴 {int(v)}"
+                        except:
+                            return str(val)
+
+                    styled_display = pivot_df.copy()
+                    # 重複がないか念のためチェック
+                    styled_display = styled_display.loc[:, ~styled_display.columns.duplicated()].copy()
+                    
+                    for col in styled_display.columns:
+                        styled_display[col] = styled_display[col].apply(add_icon)
+
+                    def color_bg(v):
+                        if "👑" in str(v): return 'background-color: #fffacd; color: #000; font-weight: bold;'
+                        if "🟢" in str(v): return 'background-color: #c6efce; color: #006100;'
+                        if "🟡" in str(v): return 'background-color: #ffeb9c; color: #9c6500;'
+                        if "🔴" in str(v): return 'background-color: #ffc7ce; color: #9c0006;'
+                        return ''
+
+                    try:
+                        return styled_display.style.applymap(color_bg)
+                    except AttributeError:
+                        return styled_display.style.map(color_bg)
+
                 for selected_quiz_for_map in selected_quizzes_for_map:
                     st.markdown(f"### 🎯 【 {selected_quiz_for_map} 】の進捗マップ")
                     
@@ -262,58 +345,6 @@ def render_test_scores_list_page():
 
                     map_tabs = st.tabs([f"🏫 {b}" for b in available_branches])
                     
-                    def sort_key(c):
-                        nums = re.findall(r'\d+', str(c))
-                        return int(nums[0]) if nums else 999
-
-                    def style_pivot_dataframe(pivot_df, target_q_name):
-                        col_mapping = {}
-                        t_master = textbook_master.get(target_q_name, {}) 
-                        
-                        for col in pivot_df.columns:
-                            chap_str = str(col)
-                            chap_name = t_master.get(chap_str, "")
-                            if chap_name:
-                                col_mapping[col] = f"{chap_str}: {chap_name}"
-                            else:
-                                col_mapping[col] = f"第{chap_str}回"
-                                
-                        pivot_df = pivot_df.rename(columns=col_mapping)
-
-                        def add_icon(val):
-                            if pd.isna(val) or val == "": return ""
-                            
-                            full_m = 100
-                            matched_marks = [v["full_marks"] for k, v in quiz_details.items() if k.startswith(f"{target_q_name}_")]
-                            if matched_marks:
-                                full_m = int(pd.Series(matched_marks).mode()[0])
-                                    
-                            try:
-                                v = float(val)
-                                ratio = v / full_m if full_m > 0 else 0
-                                if ratio >= 1.0: return f"👑 {int(v)}"
-                                elif ratio >= 0.85: return f"🟢 {int(v)}"
-                                elif ratio >= 0.2: return f"🟡 {int(v)}"
-                                else: return f"🔴 {int(v)}"
-                            except:
-                                return str(val)
-
-                        styled_display = pivot_df.copy()
-                        for col in styled_display.columns:
-                            styled_display[col] = styled_display[col].apply(add_icon)
-
-                        def color_bg(v):
-                            if "👑" in str(v): return 'background-color: #fffacd; color: #000; font-weight: bold;'
-                            if "🟢" in str(v): return 'background-color: #c6efce; color: #006100;'
-                            if "🟡" in str(v): return 'background-color: #ffeb9c; color: #9c6500;'
-                            if "🔴" in str(v): return 'background-color: #ffc7ce; color: #9c0006;'
-                            return ''
-
-                        try:
-                            return styled_display.style.applymap(color_bg)
-                        except AttributeError:
-                            return styled_display.style.map(color_bg)
-                    
                     for idx, branch in enumerate(available_branches):
                         with map_tabs[idx]:
                             df_branch = df_q[df_q['校舎'] == branch].copy()
@@ -327,8 +358,6 @@ def render_test_scores_list_page():
                             )
                             
                             if not pivot_all.empty:
-                                pivot_all = pivot_all[sorted(pivot_all.columns.tolist(), key=sort_key)]
-                                
                                 pivot_all = pivot_all.reset_index()
                                 pivot_all['学年'] = pivot_all['名前'].map(lambda x: student_name_to_grade.get(x, "未設定"))
                                 

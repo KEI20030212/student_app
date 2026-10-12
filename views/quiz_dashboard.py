@@ -1,3 +1,5 @@
+# views/quiz_dashboard.py
+
 import streamlit as st
 import pandas as pd
 import datetime
@@ -11,7 +13,6 @@ from utils.g_sheets import (
     save_quizzes_to_dedicated_sheet,  
     load_quiz_records,
     get_textbook_master,
-    # 🌟 NEW: これから g_sheets.py に追加する関数をインポート
     update_quiz_record,  
     delete_quiz_record   
 )
@@ -78,7 +79,35 @@ def render_quiz_list_page():
         nums = re.findall(r'\d+', str(c))
         return int(nums[0]) if nums else 999
 
+    # 🌟 マスターデータを基に横軸を完全展開する関数（エラー修正版）
+    def fill_all_chapters(pivot_df, target_q_name):
+        # 🐛 修正箇所：列名（単元）をすべて強制的に文字列に変換し、数値と文字の混在による重複を防ぐ
+        pivot_df.columns = [str(c) for c in pivot_df.columns]
+        pivot_df = pivot_df.loc[:, ~pivot_df.columns.duplicated()].copy()
+        
+        t_master = textbook_master.get(target_q_name, {})
+        if not t_master:
+            return pivot_df # マスターがなければそのまま返す
+            
+        # マスターにある全単元のリストを作成（キーも文字列化）
+        all_chaps = [str(k) for k in t_master.keys()]
+        
+        # pivot_dfに存在しない単元列を追加（中身は空っぽ）
+        for chap in all_chaps:
+            if chap not in pivot_df.columns:
+                pivot_df[chap] = ""
+                
+        # マスターにある順番通りに並び替えつつ、マスターに無い謎の単元（誤入力など）も一番後ろに残す
+        sorted_cols = sorted(all_chaps, key=sort_key)
+        other_cols = [c for c in pivot_df.columns if c not in all_chaps]
+        final_cols = sorted_cols + sorted(other_cols, key=sort_key)
+        
+        return pivot_df[final_cols]
+
     def style_pivot_dataframe(pivot_df, target_q_name):
+        # 🌟 ここで全単元を横軸に展開する
+        pivot_df = fill_all_chapters(pivot_df, target_q_name)
+        
         col_mapping = {}
         t_master = textbook_master.get(target_q_name, {}) 
         
@@ -111,6 +140,10 @@ def render_quiz_list_page():
                 return str(val)
 
         styled_display = pivot_df.copy()
+        
+        # 🐛 修正箇所：念のための安全装置（リネーム後にも重複がないかチェック）
+        styled_display = styled_display.loc[:, ~styled_display.columns.duplicated()].copy()
+        
         for col in styled_display.columns:
             styled_display[col] = styled_display[col].apply(add_icon)
 
@@ -132,7 +165,7 @@ def render_quiz_list_page():
     tab_student, tab_quiz_all, tab_edit = st.tabs([
         "👤 生徒別データ ＆ 結果入力", 
         "📊 小テスト別 クラス全体マップ", 
-        "⚙️ 履歴の編集・削除"  # 🌟 NEW
+        "⚙️ 履歴の編集・削除"  
     ])
 
     # -----------------------------------------------------
@@ -190,7 +223,7 @@ def render_quiz_list_page():
                                     )
                                     
                                     if success:
-                                        st.success(f"【{target_quiz} - {target_unit}】を {score}点で記録しました！")
+                                        st.success(f"【{target_quiz} 第{target_unit}回】を {score}点で記録しました！")
                                         load_quiz_records.clear() 
                                         time.sleep(1)
                                         st.rerun()
@@ -233,12 +266,10 @@ def render_quiz_list_page():
                             for i, q_name in enumerate(quiz_list):
                                 with s_tabs[i]: 
                                     df_display = latest_records[latest_records['小テスト名'] == q_name]
-                                    pivot_df = df_display[['単元', '最新点数', '挑戦回数', '実施日']].set_index('単元').T
+                                    pivot_df = df_display[['単元', '最新点数']].set_index('単元').T
                                     
                                     if not pivot_df.empty:
-                                        pivot_df = pivot_df[sorted(pivot_df.columns.tolist(), key=sort_key)]
                                         pivot_df.index.name = None 
-                                        
                                         styled_df = style_pivot_dataframe(pivot_df, q_name)
                                         st.dataframe(styled_df, use_container_width=True)
 
@@ -285,8 +316,6 @@ def render_quiz_list_page():
                                 )
                                 
                                 if not pivot_all.empty:
-                                    pivot_all = pivot_all[sorted(pivot_all.columns.tolist(), key=sort_key)]
-                                    
                                     pivot_all = pivot_all.reset_index()
                                     pivot_all['学年'] = pivot_all['名前'].map(lambda x: student_name_to_grade.get(x, "未設定"))
                                     
@@ -331,7 +360,7 @@ def render_quiz_list_page():
                                     st.info(f"この小テストを受けた {branch} の生徒はいません。")
 
     # -----------------------------------------------------
-    # 🌟 NEW タブ3: 履歴の編集・削除
+    # タブ3: 履歴の編集・削除
     # -----------------------------------------------------
     with tab_edit:
         st.subheader("⚙️ 履歴の編集・削除")
@@ -346,7 +375,6 @@ def render_quiz_list_page():
             if df_edit.empty:
                 st.info(f"{e_student_name} さんの記録はまだありません。")
             else:
-                # 📝 新しい記録が上に来るように日付で並べ替え
                 df_edit['日時_dt'] = pd.to_datetime(df_edit['日時'], format='mixed', errors='coerce')
                 df_edit = df_edit.sort_values(by='日時_dt', ascending=False).reset_index(drop=True)
                 
@@ -358,7 +386,6 @@ def render_quiz_list_page():
                     orig_unit = str(row['単元'])
                     orig_score = str(row['点数'])
                     
-                    # アコーディオン（折りたたみ）で1件ずつ表示
                     with st.expander(f"📅 {orig_date} | 📚 {orig_quiz} (第{orig_unit}回) | 💯 {orig_score}点"):
                         
                         # --- ✏️ 編集エリア ---
@@ -403,7 +430,7 @@ def render_quiz_list_page():
                                     else:
                                         st.error("❌ 更新に失敗しました。")
                         
-                        # --- 🗑️ 削除エリア（誤操作防止の安全装置付き） ---
+                        # --- 🗑️ 削除エリア ---
                         st.write("")
                         st.write("▼ この記録を削除する場合は、チェックを入れてからボタンを押してください")
                         del_check = st.checkbox("本当に削除する", key=f"chk_{i}")
