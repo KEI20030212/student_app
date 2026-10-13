@@ -1,12 +1,20 @@
+# views/self_study_dashboard.py
+
 import streamlit as st
 import requests
 import base64
 import pandas as pd
 import datetime
-import time # 🌟 追加：待ち時間を作るためのモジュール
+import time 
 
-# 🌟 変更：新しく作った update_self_study_dashboard_date 関数を読み込む
-from utils.g_sheets import load_self_study_data, update_self_study_dashboard_date
+# 🌟 NEW: configからURLとIDを呼び出す
+from utils.config import SELF_STUDY_GAS_URLS, SELF_STUDY_SHEET_IDS, SELF_STUDY_SECRET_KEY
+
+from utils.g_sheets import (
+    load_self_study_data, 
+    update_self_study_dashboard_date,
+    load_system_settings # 🌟 NEW: 動的な校舎名取得用
+)
 from utils.api_guard import robust_api_call
 
 def render_self_study_dashboard():
@@ -74,10 +82,25 @@ def render_self_study_dashboard():
     # ==========================================
     st.subheader("📥 グラフ画像のダウンロード")
     
+    # 🌟 NEW: load_system_settings() を使って校舎リストを動的に構築
+    settings = robust_api_call(load_system_settings, fallback_value={})
+    saved_branches_str = settings.get("メイン校舎名", "")
+    
+    # "田端新町校:t, 東十条駅前校:h" をパースして校舎名だけのリストにする
+    branch_list = []
+    if saved_branches_str:
+        for b in saved_branches_str.split(','):
+            if ':' in b:
+                branch_list.append(b.split(':')[0].strip())
+                
+    # もし何らかの理由で取得できなかった場合のフェイルセーフ
+    if not branch_list:
+        branch_list = ["その他"]
+
     col1, col2 = st.columns(2)
     target_branch = col1.radio(
         "🏢 校舎を選択", 
-        ["田端新町校", "東十条校"], 
+        branch_list, # 🌟 動的に取得したリストを使う
         horizontal=True
     )
     target_grade = col2.radio(
@@ -86,7 +109,6 @@ def render_self_study_dashboard():
         horizontal=True
     )
 
-    # 🌟 追加：年月の選択UI（デフォルトは今の年月）
     st.markdown("##### 📅 集計する月を設定")
     col_y, col_m = st.columns(2)
     current_year = datetime.date.today().year
@@ -94,47 +116,14 @@ def render_self_study_dashboard():
     selected_year = col_y.number_input("年 (C1セルに反映)", min_value=2020, max_value=2050, value=current_year)
     selected_month = col_m.number_input("月 (D1セルに反映)", min_value=1, max_value=12, value=current_month)
 
-    # ==========================================
-    # 🌟 ① 画像を引っ張るための「GASのURL」
-    # ==========================================
-    GAS_URLS = {
-        "田端新町校": {
-            "小学生": "https://script.google.com/macros/s/AKfycbxmaI040Qm0iDYykcP14JWw-eID_jeh_2oauTpW6ysYtYkdamtgn4uMLDYts72AQ71s/exec",
-            "中学生": "https://script.google.com/macros/s/AKfycbyFMRO5HJXNH7rh8TELMU5DXta_1qINJ41AexRe5KX0kOMDu-kXMG5ZJxNkiYgHSmQn7w/exec",
-            "高校生": "https://script.google.com/macros/s/AKfycbxEXhITzJWJrW7P_LdI1tEzFFm8p3YwoEUQ5u_-ZGmQj_GzV3dCbRJRk4a8v2SeEBgz/exec"
-        },
-        "東十条校": {
-            "小学生": "https://script.google.com/macros/s/AKfycbzzCAbe8J24XICaGNR57qD9ui_yO7Dc2D-SrZxTxRiVU77YMM0xvGC7eO0wpHxhC5IF/exec",
-            "中学生": "https://script.google.com/macros/s/AKfycbybDCaLgbVei66H7XdQgCaALoA0s1k-4lLuuIaESdRN5AYAwoROTLnJCU4bbp-wBhvf/exec",
-            "高校生": "https://script.google.com/macros/s/AKfycbz-_v6lPKqWQUpzMiZ8ExrwY722jmAbfI2Xmf2J6Lz0Z2S6HPx50KIoZMAth7lk8DEVKA/exec"
-        }
-    }
+    # 🌟 config.pyからデータを取得
+    GAS_URL = SELF_STUDY_GAS_URLS.get(target_branch, {}).get(target_grade)
+    target_sheet_id = SELF_STUDY_SHEET_IDS.get(target_branch, {}).get(target_grade)
     
-    # ==========================================
-    # 🌟 ② セル(C1, D1)に直接書き込むための「スプレッドシートID」
-    # ==========================================
-    SHEET_IDS = {
-        "田端新町校": {
-            "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
-            "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
-            "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
-        },
-        "東十条校": {
-            "小学生": "1n0NvREF5Sf8WHMVOXXHCfm6EhsYDtcDd0qB4dXMR4c8",
-            "中学生": "1okTYoVDhBfZzjcq5bVBeMxqc-7Ocv1Woz4JISDI3vGQ",
-            "高校生": "12fWkakGZPt8it_OxZNmddDOimzM0CTmCrD2GS5mIX2U"
-        }
-    }
-    
-    GAS_URL = GAS_URLS[target_branch].get(target_grade)
-    target_sheet_id = SHEET_IDS[target_branch].get(target_grade)
-    SECRET_KEY = "juku-graph-2026"
-    
-    if not GAS_URL or GAS_URL.startswith("ここ") or not target_sheet_id or target_sheet_id.startswith("ここ"):
-        st.warning(f"⚠️ 【{target_branch} - {target_grade}】用の設定が未完了です。コードのURLまたはスプレッドシートIDを書き換えてください。")
+    if not GAS_URL or not target_sheet_id:
+        st.warning(f"⚠️ 【{target_branch} {target_grade}】用のグラフ連携設定が config.py に未登録です。")
         return
 
-    # 🌟 NEW: 画面遷移を防ぐ安全な画像ダウンロードボタンを描画する関数
     def display_safe_image_download_link(img_bytes, filename, color="#1E90FF"):
         b64_img = base64.b64encode(img_bytes).decode('utf-8')
         html_button = f'''
@@ -148,9 +137,8 @@ def render_self_study_dashboard():
         '''
         st.markdown(html_button, unsafe_allow_html=True)
 
-    if st.button(f"🚀 【{target_branch} - {target_grade}】の {selected_month}月 のグラフ画像を取得する", type="primary", use_container_width=True):
+    if st.button(f"🚀 【{target_branch} {target_grade}】の {selected_month}月 のグラフ画像を取得する", type="primary", use_container_width=True):
         
-        # 🌟 処理1：スプレッドシートの年月を書き換える
         with st.spinner(f"スプレッドシートを {selected_year}年 {selected_month}月 に設定しています..."):
             success, msg = robust_api_call(
                 update_self_study_dashboard_date, 
@@ -162,15 +150,13 @@ def render_self_study_dashboard():
             
             if not success:
                 st.error(f"❌ スプレッドシートの日付更新に失敗しました: {msg}")
-                st.stop() # 失敗したらここで処理をストップ
+                st.stop()
                 
-            # 🌟 超重要：Google側が新しい月でグラフを「描き直す」まで3秒待ってあげる
             time.sleep(3)
         
-        # 🌟 処理2：書き換わって完成した最新グラフを引っ張ってくる
         with st.spinner(f"最新のグラフ画像を引っ張っています...（最大1分ほどかかる場合があります）"):
             try:
-                response = requests.get(f"{GAS_URL}?key={SECRET_KEY}", timeout=60)
+                response = requests.get(f"{GAS_URL}?key={SELF_STUDY_SECRET_KEY}", timeout=60)
                 
                 if response.status_code == 200:
                     result_text = response.text
@@ -179,13 +165,11 @@ def render_self_study_dashboard():
                         st.error(f"❌ 画像の取得に失敗しました: {result_text}")
                     else:
                         image_bytes = base64.b64decode(result_text)
-                        
-                        st.success(f"✅ 【{target_branch} - {target_grade}】の {selected_month}月分 のグラフ取得に成功しました！")
+                        st.success(f"✅ 【{target_branch} {target_grade}】の {selected_month}月分 のグラフ取得に成功しました！")
                         
                         with st.container(border=True):
                             st.image(image_bytes, use_container_width=True)
                         
-                        # 🌟 修正ポイント：Streamlitの純正ボタンをやめ、画面遷移しないHTMLリンク化
                         safe_file_name = f"学習時間グラフ_{target_branch}_{target_grade}_{selected_year}年{selected_month}月.png"
                         display_safe_image_download_link(image_bytes, safe_file_name)
                         
