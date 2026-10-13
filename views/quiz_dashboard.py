@@ -55,17 +55,29 @@ def render_quiz_list_page():
     id_col = '生徒ID' if '生徒ID' in df_students_raw.columns else None
     name_col = '生徒名' if '生徒名' in df_students_raw.columns else '名前'
     
+    sys_prefix = st.session_state.get('sys_prefix', '')
+    sys_branch = st.session_state.get('sys_branch', '')
+    branch_dict = {}
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                name, pref = b.split(':')
+                branch_dict[pref.lower()] = name
+
+    def get_branch_name(s_id_val):
+        s_id_lower = str(s_id_val).lower()
+        if s_id_lower == "trial": return "体験授業"
+        for pref, b_name in branch_dict.items():
+            if s_id_lower.startswith(pref):
+                return b_name
+        return "その他"
+    
     for _, row in df_students_raw.iterrows():
         s_name = str(row.get(name_col, "")).strip()
-        s_id = str(row.get(id_col, "")).strip().lower()
+        s_id = str(row.get(id_col, "")).strip()
         grade = str(row.get('学年', '未設定')).strip() 
         
-        if s_id == "trial": branch = "体験授業"
-        elif s_id.startswith('t'): branch = "田端新町校"
-        elif s_id.startswith('h'): branch = "東十条駅前校"
-        else: branch = "その他"
-        
-        student_name_to_branch[s_name] = branch
+        student_name_to_branch[s_name] = get_branch_name(s_id)
         student_name_to_grade[s_name] = grade 
 
     quiz_names = []
@@ -79,25 +91,20 @@ def render_quiz_list_page():
         nums = re.findall(r'\d+', str(c))
         return int(nums[0]) if nums else 999
 
-    # 🌟 マスターデータを基に横軸を完全展開する関数（エラー修正版）
     def fill_all_chapters(pivot_df, target_q_name):
-        # 🐛 修正箇所：列名（単元）をすべて強制的に文字列に変換し、数値と文字の混在による重複を防ぐ
         pivot_df.columns = [str(c) for c in pivot_df.columns]
         pivot_df = pivot_df.loc[:, ~pivot_df.columns.duplicated()].copy()
         
         t_master = textbook_master.get(target_q_name, {})
         if not t_master:
-            return pivot_df # マスターがなければそのまま返す
+            return pivot_df 
             
-        # マスターにある全単元のリストを作成（キーも文字列化）
         all_chaps = [str(k) for k in t_master.keys()]
         
-        # pivot_dfに存在しない単元列を追加（中身は空っぽ）
         for chap in all_chaps:
             if chap not in pivot_df.columns:
                 pivot_df[chap] = ""
                 
-        # マスターにある順番通りに並び替えつつ、マスターに無い謎の単元（誤入力など）も一番後ろに残す
         sorted_cols = sorted(all_chaps, key=sort_key)
         other_cols = [c for c in pivot_df.columns if c not in all_chaps]
         final_cols = sorted_cols + sorted(other_cols, key=sort_key)
@@ -105,7 +112,6 @@ def render_quiz_list_page():
         return pivot_df[final_cols]
 
     def style_pivot_dataframe(pivot_df, target_q_name):
-        # 🌟 ここで全単元を横軸に展開する
         pivot_df = fill_all_chapters(pivot_df, target_q_name)
         
         col_mapping = {}
@@ -137,11 +143,10 @@ def render_quiz_list_page():
                 elif ratio >= 0.2: return f"🟡 {int(v)}"
                 else: return f"🔴 {int(v)}"
             except:
+                # 🌟 "1回" (挑戦回数) や "2024/10/12" (実施日) はfloat変換できないためそのまま返す
                 return str(val)
 
         styled_display = pivot_df.copy()
-        
-        # 🐛 修正箇所：念のための安全装置（リネーム後にも重複がないかチェック）
         styled_display = styled_display.loc[:, ~styled_display.columns.duplicated()].copy()
         
         for col in styled_display.columns:
@@ -160,7 +165,7 @@ def render_quiz_list_page():
             return styled_display.style.map(color_bg)
 
     # ==========================================
-    # 🌟 メインの画面構成（タブを3つに！）
+    # 🌟 メインの画面構成
     # ==========================================
     tab_student, tab_quiz_all, tab_edit = st.tabs([
         "👤 生徒別データ ＆ 結果入力", 
@@ -254,6 +259,8 @@ def render_quiz_list_page():
                         df_quiz_s_sorted = df_quiz_s.reset_index().sort_values(by=['テキスト', '単元', '日時', 'index'], ascending=[True, True, False, False])
                         latest_records = df_quiz_s_sorted.drop_duplicates(subset=['テキスト', '単元'], keep='first').copy()
                         latest_records = pd.merge(latest_records, attempt_counts, on=['テキスト', '単元'], how='left')
+                        
+                        # 🌟 日付を / 形式に短縮
                         latest_records['実施日'] = latest_records['日時'].dt.strftime('%y/%m/%d')
                         latest_records['挑戦回数'] = latest_records['挑戦回数'].astype(str) + "回"
                         
@@ -266,7 +273,9 @@ def render_quiz_list_page():
                             for i, q_name in enumerate(quiz_list):
                                 with s_tabs[i]: 
                                     df_display = latest_records[latest_records['小テスト名'] == q_name]
-                                    pivot_df = df_display[['単元', '最新点数']].set_index('単元').T
+                                    
+                                    # 🌟 最新点数・挑戦回数・実施日をすべて含めてピボット（転置）する！
+                                    pivot_df = df_display[['単元', '最新点数', '挑戦回数', '実施日']].set_index('単元').T
                                     
                                     if not pivot_df.empty:
                                         pivot_df.index.name = None 
@@ -295,7 +304,7 @@ def render_quiz_list_page():
                 else:
                     df_q['校舎'] = df_q['名前'].map(lambda x: student_name_to_branch.get(x, "その他"))
                     
-                    branch_order = ["田端新町校", "東十条駅前校", "体験授業", "その他"]
+                    branch_order = list(branch_dict.values()) + ["体験授業", "その他"]
                     available_branches = [b for b in branch_order if b in df_q['校舎'].unique()]
                     
                     if not available_branches:
@@ -307,6 +316,7 @@ def render_quiz_list_page():
                             with map_tabs[idx]:
                                 df_branch = df_q[df_q['校舎'] == branch].copy()
                                 
+                                # 🌟 タブ2では日付情報は含めず、純粋に生徒の「点数」だけを扱う
                                 best_scores_all = df_branch.groupby(['名前', '単元'])['点数'].max().reset_index()
                                 pivot_all = best_scores_all.pivot_table(
                                     index='名前',
@@ -388,7 +398,6 @@ def render_quiz_list_page():
                     
                     with st.expander(f"📅 {orig_date} | 📚 {orig_quiz} (第{orig_unit}回) | 💯 {orig_score}点"):
                         
-                        # --- ✏️ 編集エリア ---
                         with st.form(f"edit_form_{i}"):
                             st.write("▼ 内容を修正して「更新」を押してください")
                             c1, c2, c3 = st.columns(3)
@@ -430,7 +439,6 @@ def render_quiz_list_page():
                                     else:
                                         st.error("❌ 更新に失敗しました。")
                         
-                        # --- 🗑️ 削除エリア ---
                         st.write("")
                         st.write("▼ この記録を削除する場合は、チェックを入れてからボタンを押してください")
                         del_check = st.checkbox("本当に削除する", key=f"chk_{i}")
