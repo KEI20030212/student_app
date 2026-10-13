@@ -6,7 +6,6 @@ from PIL import Image
 # 📦 1. 画面部隊（views）のインポート
 # ==========================================
 from views.home import render_combined_home_page
-from views.attendance_seat import render_attendance_seat_page
 from views.multi_input import render_multi_input_page
 from views.input_combined import render_combined_input_page
 from views.student_portal import render_student_portal_page
