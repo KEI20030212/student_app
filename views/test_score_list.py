@@ -15,7 +15,8 @@ from utils.g_sheets import (
     get_quiz_master_dict,                
     load_quiz_records,
     get_textbook_master,
-    update_quiz_master_defaults  
+    update_quiz_master_defaults,
+    load_system_settings # 🌟 動的に校舎を取得するため追加
 )
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -51,16 +52,28 @@ def render_test_scores_list_page():
         quiz_details = cached_get_quiz_details()
         textbook_master = cached_get_textbook_master()
 
+    # 🌟 NEW: 設定シートから校舎辞書を動的に構築
+    settings = robust_api_call(load_system_settings, fallback_value={})
+    sys_branch = settings.get("メイン校舎名", "")
+    
+    branch_dict = {}
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                b_name, pref = b.split(':')
+                branch_dict[pref.lower()] = b_name
+
     # 共通で使う「生徒の所属校舎・学年」の辞書を作成
     student_name_to_branch = {}
     student_name_to_grade = {}
     
     def assign_branch(s_id):
         s_id = str(s_id).lower()
-        if s_id.startswith('t'): return "田端新町校"
-        elif s_id.startswith('h'): return "東十条駅前校"
-        elif s_id == "trial": return "体験授業"
-        else: return "その他"
+        if s_id == "trial": return "体験授業"
+        for pref, b_name in branch_dict.items():
+            if s_id.startswith(pref):
+                return b_name
+        return "その他"
 
     if not df_students.empty and '生徒名' in df_students.columns and '生徒ID' in df_students.columns:
         for _, row in df_students.iterrows():
@@ -335,7 +348,8 @@ def render_test_scores_list_page():
                         
                     df_q['校舎'] = df_q['名前'].map(lambda x: student_name_to_branch.get(x, "その他"))
                     
-                    branch_order = ["田端新町校", "東十条駅前校", "体験授業", "その他"]
+                    # 🌟 動的に生成した校舎リストを使ってタブを作成
+                    branch_order = list(branch_dict.values()) + ["体験授業", "その他"]
                     available_branches = [b for b in branch_order if b in df_q['校舎'].unique()]
                     
                     if not available_branches:
