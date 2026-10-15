@@ -137,8 +137,7 @@ def load_system_settings():
             if num and branch:
                 # 同じ校舎ナンバーが後から出てきたら上書き（更新）される
                 branches_dict[num] = {"branch": branch, "prefix": prefix}
-        
-        # 抽出した辞書を "田端:t, 東十条:h" の形式にまとめる（ナンバー順に並び替え）
+
         sorted_branches = []
         for num in sorted(branches_dict.keys(), key=lambda x: int(x) if x.isdigit() else 999):
             b_info = branches_dict[num]
@@ -1796,7 +1795,7 @@ def sync_self_study_settings_add(student_id, name, grade_raw):
     import time
     from utils.config import SELF_STUDY_SHEET_IDS
     
-    # 🌟 NEW: 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
+    # 🌟 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
     settings = load_system_settings()
     sys_branch = settings.get("メイン校舎名", "")
     
@@ -1810,19 +1809,18 @@ def sync_self_study_settings_add(student_id, name, grade_raw):
     # 生徒IDの1文字目を取得して小文字に変換
     prefix = str(student_id)[0].lower()
     
-    # 🌟 NEW: プレフィックスから校舎名を特定
+    # 🌟 プレフィックスから校舎名を特定
     target_branch_name = branch_dict.get(prefix)
     
-    # 校舎名が特定できない場合はエラーまたはスキップ
     if not target_branch_name:
         return False, f"ID頭文字 '{prefix}' に対応する校舎が見つかりません"
-        
+
     grade_category = "その他"
     if "小" in grade_raw: grade_category = "小学生"
     elif "中" in grade_raw: grade_category = "中学生"
     elif "高" in grade_raw: grade_category = "高校生"
     
-    # 🌟 NEW: config.pyから対象のシートIDを取得
+    # config.pyから対象のシートIDを取得
     target_sheet_id = SELF_STUDY_SHEET_IDS.get(target_branch_name, {}).get(grade_category)
     
     # IDがまだ設定されていない場合はスキップする安全設計
@@ -1869,7 +1867,7 @@ def sync_self_study_settings_remove(student_id, name):
     import time
     from utils.config import SELF_STUDY_SHEET_IDS
     
-    # 🌟 NEW: 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
+    # 🌟 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
     settings = load_system_settings()
     sys_branch = settings.get("メイン校舎名", "")
     
@@ -1886,7 +1884,7 @@ def sync_self_study_settings_remove(student_id, name):
     if not target_branch_name:
         return False, f"ID頭文字 '{prefix}' に対応する校舎が見つかりません"
         
-    # 🌟 NEW: config.pyから対象の校舎のシートID一覧（小中高すべて）を取得
+    # config.pyから対象の校舎のシートID一覧（小中高すべて）を取得
     target_grade_sheets = SELF_STUDY_SHEET_IDS.get(target_branch_name, {})
     
     try:
