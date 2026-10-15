@@ -13,7 +13,8 @@ from utils.g_sheets import (
     get_all_logs, 
     load_instructor_master, 
     update_instructor_master,
-    publish_salary_data
+    publish_salary_data,
+    load_system_settings # 🌟 校舎名を動的に取得するため追加
 )
 from utils.pdf_generator import generate_payslip_pdf
 
@@ -24,14 +25,23 @@ def cached_get_all_logs():
 @st.cache_data(ttl=3600, show_spinner="☁️ 講師マスタを読み込み中...")
 def fetch_instructor_master_cached():
     df = robust_api_call(load_instructor_master, fallback_value=pd.DataFrame())
-    if df.empty or "講師名" not in df.columns:
-        return pd.DataFrame(columns=["講師名", "1:1単価", "1:2単価", "1:3単価", "交通費_田端新町校", "交通費_東十条駅前校", "役職手当"])
+    # 動的に校舎名を読み込む
+    settings = robust_api_call(load_system_settings, fallback_value={})
+    sys_branch = settings.get("メイン校舎名", "")
+    branches = [b.split(':')[0] for b in sys_branch.split(', ')] if sys_branch else ["その他"]
     
-    # 後方互換性
-    if "交通費_田端新町校" not in df.columns:
-        df["交通費_田端新町校"] = df.get("交通費", 0)
-    if "交通費_東十条駅前校" not in df.columns:
-        df["交通費_東十条駅前校"] = df.get("交通費", 0)
+    default_cols = ["講師名", "1:1単価", "1:2単価", "1:3単価", "役職手当"]
+    for b in branches:
+        default_cols.append(f"交通費_{b}")
+
+    if df.empty or "講師名" not in df.columns:
+        return pd.DataFrame(columns=default_cols)
+    
+    # 互換性維持: 設定にある校舎の交通費列がなければ、旧「交通費」からコピーまたは0埋め
+    for b in branches:
+        trans_col = f"交通費_{b}"
+        if trans_col not in df.columns:
+            df[trans_col] = df.get("交通費", 0)
         
     return df
 
@@ -74,6 +84,21 @@ def render_salary_dashboard_page():
 
     tab_calc, tab_master = st.tabs(["📊 給与計算・明細発行", "👨‍🏫 講師単価・設定変更"])
 
+    # 🌟 設定シートから校舎辞書を動的に構築
+    settings = robust_api_call(load_system_settings, fallback_value={})
+    sys_branch = settings.get("メイン校舎名", "")
+    branch_dict = {}
+    branches = [] # タブや列表示に使う校舎名のリスト
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                b_name, pref = b.split(':')
+                branch_dict[pref.lower()] = b_name
+                branches.append(b_name)
+    
+    if not branches:
+        branches = ["その他"] # フォールバック
+
     with tab_calc:
         if df_all.empty or selected_month == "データなし":
             st.info("集計対象のデータがありません。")
@@ -85,9 +110,11 @@ def render_salary_dashboard_page():
                 
             def get_branch(sid):
                 sid = str(sid).strip().lower()
-                if sid.startswith('t'): return "田端新町校"
-                elif sid.startswith('h'): return "東十条駅前校"
-                else: return "その他"
+                if sid == "trial": return "体験授業"
+                for pref, b_name in branch_dict.items():
+                    if sid.startswith(pref):
+                        return b_name
+                return "その他"
                 
             df_month['校舎'] = df_month['生徒ID'].apply(get_branch)
 
@@ -103,7 +130,6 @@ def render_salary_dashboard_page():
             valid_teachers = [t for t in df_month_exploded['担当講師'].unique() if t not in ["未入力", "", "nan", "None"]]
             
             summary_list = []
-            branches = ["田端新町校", "東十条駅前校"]
             
             for branch in branches:
                 df_branch = df_month_exploded[df_month_exploded['校舎'] == branch].copy()
@@ -143,7 +169,7 @@ def render_salary_dashboard_page():
                     transport_total = working_days * trans
                     final_salary = koma_salary + transport_total + allowance
 
-                    summary_list.append({
+                    summary_data = {
                         "🏫 校舎": branch, 
                         "👨‍🏫 担当講師": teacher, 
                         "合計コマ数": total_koma,
@@ -157,25 +183,29 @@ def render_salary_dashboard_page():
                         "💰 最終支給額 (円)": int(final_salary),
                         # 裏データ
                         "単価_11": p11, "単価_12": p12, "単価_13": p13, 
-                        "単価_交_田端": safe_int(t_row.get('交通費_田端新町校', 0)) if not t_row_df.empty else 0,
-                        "単価_交_東十条": safe_int(t_row.get('交通費_東十条駅前校', 0)) if not t_row_df.empty else 0,
-                    })
+                    }
+                    
+                    for b in branches:
+                        t_key = f"交通費_{b}"
+                        summary_data[f"単価_交_{b}"] = safe_int(t_row.get(t_key, 0)) if not t_row_df.empty else 0
+                        
+                    summary_list.append(summary_data)
 
             if summary_list:
                 df_summary = pd.DataFrame(summary_list)
                 st.subheader(f"📊 {selected_month} の給与一覧")
                 
-                b_tabs = st.tabs(["🏫 田端新町校", "🏫 東十条駅前校", "🏢 全体データ(合算)"])
+                # 🌟 動的にタブを生成
+                b_tabs = st.tabs([f"🏫 {b}" for b in branches] + ["🏢 全体データ(合算)"])
                 
                 display_cols = [c for c in df_summary.columns if not c.startswith("単価_")]
                 
-                with b_tabs[0]:
-                    df_t = df_summary[df_summary["🏫 校舎"] == "田端新町校"][display_cols]
-                    st.dataframe(df_t, hide_index=True, use_container_width=True)
-                with b_tabs[1]:
-                    df_h = df_summary[df_summary["🏫 校舎"] == "東十条駅前校"][display_cols]
-                    st.dataframe(df_h, hide_index=True, use_container_width=True)
-                with b_tabs[2]:
+                for i, b in enumerate(branches):
+                    with b_tabs[i]:
+                        df_b = df_summary[df_summary["🏫 校舎"] == b][display_cols]
+                        st.dataframe(df_b, hide_index=True, use_container_width=True)
+                        
+                with b_tabs[-1]: # 最後のタブが全体合算
                     # 画面表示用の合算処理
                     df_total_disp = df_summary.groupby("👨‍🏫 担当講師", as_index=False).agg({
                         "合計コマ数": "sum", "1:1コマ": "sum", "1:2コマ": "sum", "1:3コマ": "sum", 
@@ -205,21 +235,23 @@ def render_salary_dashboard_page():
                         for row in summary_list:
                             t_name = row["👨‍🏫 担当講師"]
                             if t_name not in grouped_pdf_data:
-                                grouped_pdf_data[t_name] = {
+                                pdf_data_init = {
                                     "講師名": t_name,
                                     "単価_11": row["単価_11"], "単価_12": row["単価_12"], "単価_13": row["単価_13"],
-                                    "単価_交_田端": row["単価_交_田端"], "単価_交_東十条": row["単価_交_東十条"],
                                     "役職手当": row["役職手当 (円)"], # 手当は二重加算しないように1回だけ保持
                                     "交通費合計": 0,
-                                    "田端": {"11": 0, "12": 0, "13": 0, "days": 0},
-                                    "東十条": {"11": 0, "12": 0, "13": 0, "days": 0}
                                 }
+                                for b in branches:
+                                    pdf_data_init[f"単価_交_{b}"] = row.get(f"単価_交_{b}", 0)
+                                    pdf_data_init[b] = {"11": 0, "12": 0, "13": 0, "days": 0}
+                                grouped_pdf_data[t_name] = pdf_data_init
                             
-                            b_key = "田端" if row["🏫 校舎"] == "田端新町校" else "東十条"
-                            grouped_pdf_data[t_name][b_key]["11"] += row["1:1コマ"]
-                            grouped_pdf_data[t_name][b_key]["12"] += row["1:2コマ"]
-                            grouped_pdf_data[t_name][b_key]["13"] += row["1:3コマ"]
-                            grouped_pdf_data[t_name][b_key]["days"] += row["出勤日数"]
+                            b_key = row["🏫 校舎"]
+                            if b_key in grouped_pdf_data[t_name]:
+                                grouped_pdf_data[t_name][b_key]["11"] += row["1:1コマ"]
+                                grouped_pdf_data[t_name][b_key]["12"] += row["1:2コマ"]
+                                grouped_pdf_data[t_name][b_key]["13"] += row["1:3コマ"]
+                                grouped_pdf_data[t_name][b_key]["days"] += row["出勤日数"]
                             
                             grouped_pdf_data[t_name]["交通費合計"] += row["交通費合計 (円)"]
 
@@ -254,8 +286,12 @@ def render_salary_dashboard_page():
                     new_12 = st.number_input("1:2 単価", value=int(current_vals.get('1:2単価', 1800)), step=100)
                     new_13 = st.number_input("1:3 単価", value=int(current_vals.get('1:3単価', 2000)), step=100)
                 with col2:
-                    new_trans_t = st.number_input("田端新町校 交通費/日", value=int(current_vals.get('交通費_田端新町校', current_vals.get('交通費', 0))), step=10)
-                    new_trans_h = st.number_input("東十条駅前校 交通費/日", value=int(current_vals.get('交通費_東十条駅前校', current_vals.get('交通費', 0))), step=10)
+                    # 🌟 動的に交通費入力欄を生成
+                    new_trans = {}
+                    for b in branches:
+                        trans_key = f"交通費_{b}"
+                        new_val = st.number_input(f"{b} 交通費/日", value=int(current_vals.get(trans_key, 0)), step=10)
+                        new_trans[trans_key] = new_val
                     new_allowance = st.number_input("役職手当", value=int(current_vals.get('役職手当', 0)), step=1000)
                 
                 if st.form_submit_button("✅ この内容で保存する", type="primary"):
@@ -263,8 +299,10 @@ def render_salary_dashboard_page():
                     df_instructors.at[idx, '1:1単価'] = new_11
                     df_instructors.at[idx, '1:2単価'] = new_12
                     df_instructors.at[idx, '1:3単価'] = new_13
-                    df_instructors.at[idx, '交通費_田端新町校'] = new_trans_t
-                    df_instructors.at[idx, '交通費_東十条駅前校'] = new_trans_h
+                    
+                    for k, v in new_trans.items():
+                        df_instructors.at[idx, k] = v
+                        
                     df_instructors.at[idx, '役職手当'] = new_allowance
                     
                     with st.spinner("☁️ 保存中..."):
