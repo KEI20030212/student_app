@@ -1,4 +1,5 @@
-#田端東十条版
+# views/student_portal.py
+
 import streamlit as st
 import time
 import pandas as pd
@@ -12,7 +13,8 @@ from utils.g_sheets import (
     move_student_to_inactive_sheet,
     get_all_logs,
     sync_self_study_settings_add,
-    sync_self_study_settings_remove
+    sync_self_study_settings_remove,
+    load_system_settings # 🌟 動的に校舎を取得するため追加
 )
 from utils.api_guard import robust_api_call
 
@@ -67,6 +69,19 @@ def render_student_portal_page():
             
             st.divider()
 
+            # 🌟 NEW: 設定シートから校舎名とプレフィックスの対応を動的に取得
+            settings = robust_api_call(load_system_settings, fallback_value={})
+            sys_branch = settings.get("メイン校舎名", "")
+            
+            branch_opts = {}
+            if sys_branch:
+                for b in sys_branch.split(', '):
+                    if ':' in b:
+                        b_name, pref = b.split(':')
+                        branch_opts[b_name] = pref.lower()
+                
+            branch_opts["プレフィックスなし (数字のみ)"] = ""
+
             # ==========================================
             # 1️⃣ 新入生追加
             # ==========================================
@@ -77,11 +92,6 @@ def render_student_portal_page():
                     with st.form("add_new_student_form"):
                         st.markdown("##### 📝 基本情報の入力")
                         
-                        branch_opts = {
-                            "田端新町校": "t",
-                            "東十条駅前校": "h",
-                            "プレフィックスなし (数字のみ)": ""
-                        }
                         selected_branch_key = st.selectbox("🏫 所属校舎（生徒IDの頭文字になります）", list(branch_opts.keys()), index=0)
                         
                         if not df_students.empty and '生徒ID' in df_students.columns:
@@ -159,7 +169,6 @@ def render_student_portal_page():
                         success = robust_api_call(_create_student, fallback_value=False)
                         
                         if success:
-                            # 🌟 変更：生徒ID（final_student_id）も一緒に送る！
                             robust_api_call(
                                 sync_self_study_settings_add,
                                 student_id=final_student_id,
@@ -303,7 +312,6 @@ def render_student_portal_page():
                             success, err_msg = robust_api_call(move_student_to_inactive_sheet, target_id, fallback_value=(False, "通信タイムアウト"))
                             
                             if success:
-                                # 🌟 変更：生徒ID（target_id）も一緒に送る！
                                 robust_api_call(
                                     sync_self_study_settings_remove,
                                     student_id=target_id,
