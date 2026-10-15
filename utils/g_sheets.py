@@ -98,7 +98,7 @@ def get_student_info(student_name):#「特定の生徒1人だけの詳細情報�
     return {}
 
 #app.py
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600, show_spinner=False)
 def load_system_settings():
     """
     システム全体の基本設定（教室長名、校舎名、生徒IDプレフィックスなど）を読み込む。
@@ -1529,6 +1529,211 @@ def update_quiz_master_defaults(selected_quiz_names):
         print(f"デフォルト設定の更新エラー: {e}")
         return False
 
+#self_study_edit.py
+def update_self_study_record(target_data, new_data):
+    """
+    過去の自習記録を修正・上書き保存する関数（全体シートと学年別シートの2箇所同時対応）
+    """
+    import gspread
+    from utils.config import SELF_STUDY_SHEET_IDS
+    
+    try:
+        gc = get_gc_client()
+        
+        # 🌟 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
+        settings = load_system_settings()
+        sys_branch = settings.get("メイン校舎名", "")
+        
+        branch_dict = {}
+        if sys_branch:
+            for b in sys_branch.split(', '):
+                if ':' in b:
+                    b_name, pref = b.split(':')
+                    branch_dict[pref.lower()] = b_name
+
+        # 🌟 生徒マスタから名前を検索し、生徒IDを取得して校舎と学年を特定
+        student_master = get_student_master()
+        target_name = target_data.get("名前")
+        student_row = student_master[student_master['生徒名'] == target_name]
+        
+        target_branch_name = "その他"
+        grade_category = "その他"
+        
+        if not student_row.empty:
+            s_id = str(student_row['生徒ID'].values[0]).lower()
+            grade_raw = str(student_row['学年'].values[0])
+            
+            for pref, b_name in branch_dict.items():
+                if s_id.startswith(pref):
+                    target_branch_name = b_name
+                    break
+                    
+            if "小" in grade_raw: grade_category = "小学生"
+            elif "中" in grade_raw: grade_category = "中学生"
+            elif "高" in grade_raw: grade_category = "高校生"
+            
+        # 🌟 更新対象のシートIDリスト（1.全体用マスタ ＋ 2.学年・校舎別用）
+        target_sheets = [SPREADSHEET_ID]
+        sub_sheet_id = SELF_STUDY_SHEET_IDS.get(target_branch_name, {}).get(grade_category)
+        
+        if sub_sheet_id and not sub_sheet_id.startswith("ここ"):
+            target_sheets.append(sub_sheet_id)
+
+        success_flag = False
+
+        # 🌟 2つのシート両方に対して更新処理を実行するループ
+        for sheet_id in target_sheets:
+            try:
+                sh = gc.open_by_key(sheet_id)
+                ws = sh.worksheet("自習記録")
+                records = ws.get_all_values()
+                if not records: continue
+                
+                header = records[0]
+                # ヘッダー列名の揺れを吸収するマッピング（保存先シートによって列名が少し違っても対応可能）
+                col_idx = {}
+                for i, name in enumerate(header):
+                    clean_name = str(name).strip()
+                    if "日付" in clean_name: col_idx["日付"] = i
+                    elif "名前" in clean_name: col_idx["名前"] = i
+                    elif "開始" in clean_name: col_idx["開始"] = i
+                    elif "終了" in clean_name: col_idx["終了"] = i
+                    elif "科目" in clean_name: col_idx["科目"] = i
+                    elif "内容" in clean_name: col_idx["内容"] = i
+                    elif "休憩" in clean_name: col_idx["休憩"] = i
+                    elif "実質" in clean_name: col_idx["実質"] = i
+                    elif "ポイント" in clean_name or "pt" in clean_name.lower(): col_idx["獲得pt"] = i
+                
+                target_row_idx = -1
+                for i, row in enumerate(records[1:], start=2): # 1行目はヘッダーなので2行目から
+                    if len(row) > max(col_idx.values(), default=0):
+                        r_name = row[col_idx.get("名前", -1)]
+                        r_date = row[col_idx.get("日付", -1)]
+                        r_start = row[col_idx.get("開始", -1)]
+                        
+                        # 検索条件：名前、日付、開始時間(hh:mm) が一致する行を探す
+                        if str(r_name).strip() == str(target_name).strip() and \
+                           str(r_date).strip() == str(target_data.get("日付")).strip() and \
+                           str(r_start).strip()[:5] == str(target_data.get("開始")).strip()[:5]:
+                            target_row_idx = i
+                            break
+                            
+                # 見つかった場合はその行の特定のセルだけを更新する
+                if target_row_idx != -1:
+                    update_cells = []
+                    for new_key, val in new_data.items():
+                        if new_key in col_idx:
+                            c_idx = col_idx[new_key] + 1 # gspreadは1-indexed
+                            update_cells.append(gspread.Cell(target_row_idx, c_idx, val))
+                            
+                    if update_cells:
+                        ws.update_cells(update_cells, value_input_option='USER_ENTERED')
+                        success_flag = True
+                        
+            except Exception as e:
+                print(f"シート({sheet_id})の更新スキップ: {e}")
+                continue # 片方のシートがなくても、もう片方は更新を続ける
+
+        if success_flag:
+            return True, "成功"
+        else:
+            return False, "修正対象の記録が見つかりませんでした。"
+            
+    except Exception as e:
+        return False, str(e)
+
+def delete_self_study_record(target_data):
+    """
+    過去の自習記録を削除する関数（全体シートと学年別シートの2箇所同時対応）
+    """
+    from utils.config import SELF_STUDY_SHEET_IDS
+    
+    try:
+        gc = get_gc_client()
+        
+        settings = load_system_settings()
+        sys_branch = settings.get("メイン校舎名", "")
+        
+        branch_dict = {}
+        if sys_branch:
+            for b in sys_branch.split(', '):
+                if ':' in b:
+                    b_name, pref = b.split(':')
+                    branch_dict[pref.lower()] = b_name
+
+        student_master = get_student_master()
+        target_name = target_data.get("名前")
+        student_row = student_master[student_master['生徒名'] == target_name]
+        
+        target_branch_name = "その他"
+        grade_category = "その他"
+        
+        if not student_row.empty:
+            s_id = str(student_row['生徒ID'].values[0]).lower()
+            grade_raw = str(student_row['学年'].values[0])
+            
+            for pref, b_name in branch_dict.items():
+                if s_id.startswith(pref):
+                    target_branch_name = b_name
+                    break
+                    
+            if "小" in grade_raw: grade_category = "小学生"
+            elif "中" in grade_raw: grade_category = "中学生"
+            elif "高" in grade_raw: grade_category = "高校生"
+            
+        target_sheets = [SPREADSHEET_ID]
+        sub_sheet_id = SELF_STUDY_SHEET_IDS.get(target_branch_name, {}).get(grade_category)
+        
+        if sub_sheet_id and not sub_sheet_id.startswith("ここ"):
+            target_sheets.append(sub_sheet_id)
+
+        success_flag = False
+
+        for sheet_id in target_sheets:
+            try:
+                sh = gc.open_by_key(sheet_id)
+                ws = sh.worksheet("自習記録")
+                records = ws.get_all_values()
+                if not records: continue
+                
+                header = records[0]
+                col_idx = {}
+                for i, name in enumerate(header):
+                    clean_name = str(name).strip()
+                    if "日付" in clean_name: col_idx["日付"] = i
+                    elif "名前" in clean_name: col_idx["名前"] = i
+                    elif "開始" in clean_name: col_idx["開始"] = i
+                
+                target_row_idx = -1
+                for i, row in enumerate(records[1:], start=2): 
+                    if len(row) > max(col_idx.values(), default=0):
+                        r_name = row[col_idx.get("名前", -1)]
+                        r_date = row[col_idx.get("日付", -1)]
+                        r_start = row[col_idx.get("開始", -1)]
+                        
+                        if str(r_name).strip() == str(target_name).strip() and \
+                           str(r_date).strip() == str(target_data.get("日付")).strip() and \
+                           str(r_start).strip()[:5] == str(target_data.get("開始")).strip()[:5]:
+                            target_row_idx = i
+                            break
+                            
+                if target_row_idx != -1:
+                    # 🌟 見つかった行を丸ごと削除する
+                    ws.delete_rows(target_row_idx)
+                    success_flag = True
+                        
+            except Exception as e:
+                print(f"シート({sheet_id})の削除スキップ: {e}")
+                continue 
+
+        if success_flag:
+            return True, "成功"
+        else:
+            return False, "削除対象の記録が見つかりませんでした。"
+            
+    except Exception as e:
+        return False, str(e)
+
 #self_study_dashboard.py
 def load_self_study_data():
     """自習記録シートから全データを取得してシステム用の表（データフレーム）にして返す"""
@@ -1551,31 +1756,37 @@ def load_self_study_data():
 def sync_self_study_settings_add(student_id, name, grade_raw):
     """新入生を自習管理スプレッドシートの「設定」シートに自動追加する（複数校舎対応）"""
     import time
+    from utils.config import SELF_STUDY_SHEET_IDS
     
-    # 🌟 生徒IDの1文字目を取得して小文字に変換（t または h）
+    # 🌟 NEW: 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
+    settings = load_system_settings()
+    sys_branch = settings.get("メイン校舎名", "")
+    
+    branch_dict = {}
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                b_name, pref = b.split(':')
+                branch_dict[pref.lower()] = b_name
+
+    # 生徒IDの1文字目を取得して小文字に変換
     prefix = str(student_id)[0].lower()
     
-    if prefix == 'h':
-        # 🏢 東十条校用のスプレッドシートID（※ここにIDを設定してください！）
-        GRADE_SHEET_IDS = {
-            "小学生": "1n0NvREF5Sf8WHMVOXXHCfm6EhsYDtcDd0qB4dXMR4c8",
-            "中学生": "1okTYoVDhBfZzjcq5bVBeMxqc-7Ocv1Woz4JISDI3vGQ",
-            "高校生": "12fWkakGZPt8it_OxZNmddDOimzM0CTmCrD2GS5mIX2U"
-        }
-    else:
-        # 🏢 田端新町校用のスプレッドシートID（tから始まる場合、または数字だけの場合）
-        GRADE_SHEET_IDS = {
-            "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
-            "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
-            "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
-        }
-
+    # 🌟 NEW: プレフィックスから校舎名を特定
+    target_branch_name = branch_dict.get(prefix)
+    
+    # 校舎名が特定できない場合はエラーまたはスキップ
+    if not target_branch_name:
+        return False, f"ID頭文字 '{prefix}' に対応する校舎が見つかりません"
+        
     grade_category = "その他"
     if "小" in grade_raw: grade_category = "小学生"
     elif "中" in grade_raw: grade_category = "中学生"
     elif "高" in grade_raw: grade_category = "高校生"
     
-    target_sheet_id = GRADE_SHEET_IDS.get(grade_category)
+    # 🌟 NEW: config.pyから対象のシートIDを取得
+    target_sheet_id = SELF_STUDY_SHEET_IDS.get(target_branch_name, {}).get(grade_category)
+    
     # IDがまだ設定されていない場合はスキップする安全設計
     if not target_sheet_id or target_sheet_id.startswith("ここ"): return True, "対象外"
 
@@ -1618,28 +1829,32 @@ def sync_self_study_settings_add(student_id, name, grade_raw):
 def sync_self_study_settings_remove(student_id, name):
     """退塾生を自習管理スプレッドシートの「設定」シートから自動削除する（複数校舎対応）"""
     import time
+    from utils.config import SELF_STUDY_SHEET_IDS
     
+    # 🌟 NEW: 設定シートから現在の全校舎のプレフィックスと校舎名の対応を取得
+    settings = load_system_settings()
+    sys_branch = settings.get("メイン校舎名", "")
+    
+    branch_dict = {}
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                b_name, pref = b.split(':')
+                branch_dict[pref.lower()] = b_name
+
     prefix = str(student_id)[0].lower()
+    target_branch_name = branch_dict.get(prefix)
     
-    if prefix == 'h':
-        # 🏢 東十条校用のスプレッドシートID
-        GRADE_SHEET_IDS = {
-            "小学生": "1n0NvREF5Sf8WHMVOXXHCfm6EhsYDtcDd0qB4dXMR4c8",
-            "中学生": "1okTYoVDhBfZzjcq5bVBeMxqc-7Ocv1Woz4JISDI3vGQ",
-            "高校生": "12fWkakGZPt8it_OxZNmddDOimzM0CTmCrD2GS5mIX2U"
-        }
-    else:
-        # 🏢 田端新町校用のスプレッドシートID
-        GRADE_SHEET_IDS = {
-            "小学生": "1V4ID3wirXoTM3M-rdZeYhfu0wrVE19wu3AZOod2XVJ0",
-            "中学生": "1Tbbz7SO0-chcOlUwsDjTVhAYQ9zXNhopfwSPFpByD9A",
-            "高校生": "1nnFJo8k81VBuz232gAZYVnSX47YgLuaU8Mqt1hzuS_M"
-        }
+    if not target_branch_name:
+        return False, f"ID頭文字 '{prefix}' に対応する校舎が見つかりません"
+        
+    # 🌟 NEW: config.pyから対象の校舎のシートID一覧（小中高すべて）を取得
+    target_grade_sheets = SELF_STUDY_SHEET_IDS.get(target_branch_name, {})
     
     try:
         gc = get_gc_client()
-        for sheet_id in GRADE_SHEET_IDS.values():
-            if sheet_id.startswith("ここ"): continue
+        for sheet_id in target_grade_sheets.values():
+            if not sheet_id or sheet_id.startswith("ここ"): continue
             try:
                 sh = gc.open_by_key(sheet_id)
                 worksheet = sh.worksheet("設定")
