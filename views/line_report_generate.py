@@ -10,7 +10,8 @@ from utils.g_sheets import (
     get_sent_list,      
     update_sent_flag,
     get_quiz_master_dict,
-    get_all_accounts
+    get_all_accounts,
+    load_system_settings # 🌟 動的に校舎や教室長を取得するため追加
 )
 from utils.g_drive import get_or_create_student_folder
 from utils.api_guard import robust_api_call
@@ -43,23 +44,28 @@ def render_report_generation_tab(can_use_report):
         df_hw = cached_load_hw_records() 
         quiz_master = cached_get_quiz_master()
         
-        # 🌟 管理者の名前（署名）を取得する処理
-        accounts_data = robust_api_call(get_all_accounts, fallback_value={})
-        admin_name = "教室長" # 見つからなかった場合のデフォルト値
+        # 🌟 設定シートから各種設定を動的に取得
+        settings = robust_api_call(load_system_settings, fallback_value={})
+        sys_branch = settings.get("メイン校舎名", "")
+        manager_name_from_settings = settings.get("教室長名", "") # 設定シートの教室長名
         
-        for account_id, info in accounts_data.items():
-            if str(info.get('権限', '')).lower() == 'admin':
-                # まずフルネームを取得（列名が「講師名」か「名前」か揺れを吸収）
-                raw_name = str(info.get('講師名', info.get('名前', '教室長'))).strip()
-                
-                # 🌟 スペース（全角・半角）で分割し、最初の部分（苗字）だけを取り出す
-                if ' ' in raw_name or ' ' in raw_name:
-                    # 全角スペースを半角に変換してから分割
-                    split_name = raw_name.replace(' ', ' ').split(' ')
-                    admin_name = split_name[0]
-                else:
-                    admin_name = raw_name
-                break
+        # 🌟 管理者の名前（署名）を決定する処理
+        # 設定シートに名前があればそれを最優先し、無ければアカウント情報から取得する
+        if manager_name_from_settings and manager_name_from_settings != "教室長":
+            admin_name = manager_name_from_settings
+        else:
+            accounts_data = robust_api_call(get_all_accounts, fallback_value={})
+            admin_name = "教室長" # 見つからなかった場合のデフォルト値
+            
+            for account_id, info in accounts_data.items():
+                if str(info.get('権限', '')).lower() == 'admin':
+                    raw_name = str(info.get('講師名', info.get('名前', '教室長'))).strip()
+                    if ' ' in raw_name or ' ' in raw_name: # 半角・全角スペース対応
+                        split_name = raw_name.replace(' ', ' ').split(' ')
+                        admin_name = split_name[0]
+                    else:
+                        admin_name = raw_name
+                    break
 
         if df_all_logs.empty or "APIエラー発生" in df_all_logs.columns:
             st.error("授業記録データの取得に失敗しました。")
@@ -101,15 +107,38 @@ def render_report_generation_tab(can_use_report):
         if missing_url_students:
             st.error(f"🚨 **【答案確認URL 未添付アラート】** 以下の生徒は小テスト記録がないため、報告書に「答案確認URL」が表示されていません。\n\n**{', '.join(missing_url_students)}**")
 
-    data_buckets = {"田端新町校": [], "東十条駅前校": [], "体験授業": [], "その他": []}
+    # 🌟 動的に校舎のバケツ（分類用の箱）を用意
+    branch_dict = {}
+    if sys_branch:
+        for b in sys_branch.split(', '):
+            if ':' in b:
+                b_name, pref = b.split(':')
+                branch_dict[pref.lower()] = b_name
+                
+    data_buckets = {b_name: [] for b_name in branch_dict.values()}
+    data_buckets["体験授業"] = []
+    data_buckets["その他"] = []
+    
     for s in target_students:
         s_id = str(s.get(id_col, "")).lower()
-        if s_id == "trial": data_buckets["体験授業"].append(s)
-        elif s_id.startswith('t'): data_buckets["田端新町校"].append(s)
-        elif s_id.startswith('h'): data_buckets["東十条駅前校"].append(s)
-        else: data_buckets["その他"].append(s)
+        if s_id == "trial": 
+            data_buckets["体験授業"].append(s)
+        else:
+            matched = False
+            for pref, b_name in branch_dict.items():
+                if s_id.startswith(pref):
+                    data_buckets[b_name].append(s)
+                    matched = True
+                    break
+            if not matched:
+                data_buckets["その他"].append(s)
 
     display_buckets = {k: v for k, v in data_buckets.items() if len(v) > 0 or k != "その他"}
+    
+    if not display_buckets:
+        st.info("対象の生徒はいません。")
+        return
+        
     tabs = st.tabs([f"🏫 {k} ({len(v)}名)" for k, v in display_buckets.items()])
 
     for t_idx, (bucket_name, students) in enumerate(display_buckets.items()):
@@ -226,7 +255,7 @@ def render_report_generation_tab(can_use_report):
                 if quiz_results_list:
                     quiz_text = "\n・".join(quiz_results_list)
 
-                # 🌟 メールの一番下に、上で取得した admin_name を動的に埋め込む
+                # 🌟 メールの署名部分に admin_name（教室長名）を動的に埋め込み
                 if bucket_name == "体験授業":
                     advices_block = f"🗣️ 【本日の輝いていた点】\n" + "\n\n".join(advice_sections) + "\n\n" if advice_sections else ""
                     msgs_block = f"📢 【今後の課題・ご提案】\n" + "\n\n".join(parent_msg_sections) + "\n\n" if parent_msg_sections else ""
