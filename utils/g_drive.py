@@ -1,3 +1,5 @@
+# utils/g_drive.py
+
 import streamlit as st
 import json
 import base64
@@ -5,13 +7,10 @@ import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-# 🌟 大元フォルダのID
-MAIN_FOLDER_ID = "1PptAgfwzUT-wR5bPyYHaCO_olsEzi8FS" 
+# 🌟 NEW: config.py から大元フォルダIDとGASのURLを呼び出す
+from utils.config import GDRIVE_MAIN_FOLDER_ID, GDRIVE_GAS_WEBHOOK_URL
 
-# 🌟 GASのウェブアプリURL
-GAS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw5HuhPiaY8TwX190H5ya9uLDOsHqiT706n51vHDjHFCmd_sTQQb0654q2QyBavOTGqyA/exec"
-
-# 🌟 変更点: 削除機能を追加するため、readonlyを外してフルアクセス権限に変更します
+# 削除機能を追加するため、readonlyを外してフルアクセス権限に変更します
 SCOPES = ['https://www.googleapis.com/auth/drive'] 
 
 def get_drive_service():
@@ -26,7 +25,7 @@ def get_student_folder_id(student_id, student_name):
     service = get_drive_service()
     folder_name = f"{student_id}_{student_name}"
     
-    query = f"'{MAIN_FOLDER_ID}' in parents and name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    query = f"'{GDRIVE_MAIN_FOLDER_ID}' in parents and name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
     items = results.get('files', [])
     
@@ -51,7 +50,7 @@ def upload_image_to_drive(student_id, student_name, file_name, file_bytes, mime_
             "fileData": b64_data
         }
         
-        response = requests.post(GAS_WEBHOOK_URL, json=payload)
+        response = requests.post(GDRIVE_GAS_WEBHOOK_URL, json=payload)
         result = response.json()
         
         if result.get("success"):
@@ -85,12 +84,12 @@ def list_student_images(student_id, student_name):
         return []
 
 # ==========================================
-# 🗑️ 【改善版】画像を「gomi」フォルダへ移動する関数群
+# 🗑️ 画像を「gomi」フォルダへ移動する関数群
 # ==========================================
 
 def get_or_create_gomi_folder(service):
     """大元フォルダの中に「gomi」フォルダがあるか探し、なければ作成してIDを返す"""
-    query = f"'{MAIN_FOLDER_ID}' in parents and name='gomi' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    query = f"'{GDRIVE_MAIN_FOLDER_ID}' in parents and name='gomi' and mimeType='application/vnd.google-apps.folder' and trashed=false"
     results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
     items = results.get('files', [])
     
@@ -101,11 +100,10 @@ def get_or_create_gomi_folder(service):
     folder_metadata = {
         'name': 'gomi',
         'mimeType': 'application/vnd.google-apps.folder',
-        'parents': [MAIN_FOLDER_ID]
+        'parents': [GDRIVE_MAIN_FOLDER_ID]
     }
     folder = service.files().create(body=folder_metadata, fields='id').execute()
     return folder.get('id')
-
 
 def delete_file_from_drive(file_id):
     """指定されたファイルIDの画像を元の生徒フォルダから除外し、「gomi」フォルダへ移動する"""
@@ -149,7 +147,7 @@ def delete_file_from_drive(file_id):
             return False
         
 # ==========================================
-# 📚 新機能：クラウド教材書庫（Library）用 関数群（第3階層対応版）
+# 📚 クラウド教材書庫（Library）用 関数群
 # ==========================================
 import io
 from googleapiclient.http import MediaIoBaseUpload
@@ -173,9 +171,6 @@ def get_or_create_folder(service, parent_id, folder_name):
     folder = service.files().create(body=folder_metadata, fields='id').execute()
     return folder.get('id')
 
-import base64
-import requests
-
 def upload_library_file(category_name, sub_category_name, chapter_name, file_name, file_bytes, mime_type):
     """
     書庫にPDFをアップロードする（GAS経由版・容量エラー回避）
@@ -185,8 +180,7 @@ def upload_library_file(category_name, sub_category_name, chapter_name, file_nam
         service = get_drive_service()
         
         # --- Python側でフォルダツリー（階層）だけを作成・準備する ---
-        # （フォルダの作成は容量を食わないため、サービスアカウントでも可能）
-        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        root_lib_id = get_or_create_folder(service, GDRIVE_MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
         cat_id = get_or_create_folder(service, root_lib_id, category_name)
         sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
         
@@ -200,7 +194,7 @@ def upload_library_file(category_name, sub_category_name, chapter_name, file_nam
         
         # 既存のGASアプリに「このフォルダ(parent_for_file)に、このファイルを入れてね」とお願いする
         payload = {
-            "targetFolderId": parent_for_file,  # 🌟 NEW: GAS側に保存先のフォルダIDを直接指定！
+            "targetFolderId": parent_for_file,  
             "fileName": file_name,
             "mimeType": mime_type,
             "fileData": b64_data,
@@ -209,7 +203,7 @@ def upload_library_file(category_name, sub_category_name, chapter_name, file_nam
             "studentName": "LIBRARY"
         }
         
-        response = requests.post(GAS_WEBHOOK_URL, json=payload)
+        response = requests.post(GDRIVE_GAS_WEBHOOK_URL, json=payload)
         result = response.json()
         
         if result.get("success"):
@@ -222,10 +216,10 @@ def upload_library_file(category_name, sub_category_name, chapter_name, file_nam
         return False, str(e)
 
 def list_library_folders(category_name, sub_category_name):
-    """🌟 NEW: 指定したテキスト（サブカテゴリ）配下にある「章・回」のフォルダ一覧を取得する"""
+    """指定したテキスト（サブカテゴリ）配下にある「章・回」のフォルダ一覧を取得する"""
     try:
         service = get_drive_service()
-        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        root_lib_id = get_or_create_folder(service, GDRIVE_MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
         cat_id = get_or_create_folder(service, root_lib_id, category_name)
         sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
         
@@ -242,7 +236,7 @@ def list_library_files(category_name, sub_category_name, chapter_name=None):
     """指定した場所のPDF一覧を取得する（ファイルのみ）"""
     try:
         service = get_drive_service()
-        root_lib_id = get_or_create_folder(service, MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
+        root_lib_id = get_or_create_folder(service, GDRIVE_MAIN_FOLDER_ID, LIBRARY_ROOT_NAME)
         cat_id = get_or_create_folder(service, root_lib_id, category_name)
         sub_cat_id = get_or_create_folder(service, cat_id, sub_category_name)
         
@@ -267,8 +261,6 @@ def list_library_files(category_name, sub_category_name, chapter_name=None):
 # ==========================================
 # 🗑️ 書庫ファイルの削除（GAS経由でgomiフォルダへ移動）
 # ==========================================
-import requests
-# ※GAS_WEBHOOK_URL が定義されている前提です
 def delete_library_file(file_id):
     """GASに「このファイルを削除（gomiへ移動）して」とお願いする"""
     try:
@@ -277,7 +269,7 @@ def delete_library_file(file_id):
             "fileId": file_id
         }
         
-        response = requests.post(GAS_WEBHOOK_URL, json=payload)
+        response = requests.post(GDRIVE_GAS_WEBHOOK_URL, json=payload)
         result = response.json()
         
         if result.get("success"):

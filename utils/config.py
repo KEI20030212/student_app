@@ -51,3 +51,13 @@ SELF_STUDY_SHEET_IDS = {
 
 # 認証用シークレットキー
 SELF_STUDY_SECRET_KEY = "juku-graph-2026"
+
+# ==========================================
+# 📂 Google Drive 連携用設定
+# ==========================================
+
+# 🌟 大元フォルダ（生徒のフォルダや書庫が作られる親フォルダ）のID
+GDRIVE_MAIN_FOLDER_ID = "1PptAgfwzUT-wR5bPyYHaCO_olsEzi8FS"
+
+# 🌟 答案画像や書庫ファイルのアップロード・削除処理を担当する GAS (Google Apps Script) のウェブアプリURL
+GDRIVE_GAS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw5HuhPiaY8TwX190H5ya9uLDOsHqiT706n51vHDjHFCmd_sTQQb0654q2QyBavOTGqyA/exec"
