@@ -1,12 +1,12 @@
+# views/my_salary.py
+
 import streamlit as st
 import pandas as pd
 import time 
 
 from utils.api_guard import robust_api_call
 from utils.g_sheets import load_published_salary
-from utils.pdf_generator import generate_payslip_pdf
 
-# 👇 修正: @st.cache_data を削除！（キャッシュ管理は g_sheets.py に完全に任せる）
 def get_my_salary_data_safe():
     """公開済みの給与データを取得・防御（キャッシュはg_sheets側で処理）"""
     with st.spinner("☁️ 給与データを取得中..."):
@@ -19,7 +19,6 @@ def render_my_salary_page():
     st.header(f"💴 {teacher_name} 先生の給与確認")
     st.write("※教室長から公開された確定済みの給与明細を表示しています。")
 
-    # 👇 修正: 二重キャッシュを排除した新しい関数を呼び出す
     df_all_salaries = get_my_salary_data_safe()
     
     # --------------------------------------------------------
@@ -88,23 +87,12 @@ def render_my_salary_page():
     col3.metric("交通費・手当", f"¥{transport_fee + allowance:,}")
 
     st.write("**詳細データ**")
+    # 画面に表示しない「裏側の計算用データ」などを除外して綺麗に表示
     display_df = pd.DataFrame([selected_row]).drop(columns=['年月'], errors='ignore')
-    st.dataframe(display_df, hide_index=True, use_container_width=True)
-
-    st.divider()
-
-    # --- 📄 給与明細PDFのダウンロード ---
-    st.subheader("📄 給与明細のダウンロード")
-    row_dict = selected_row.to_dict()
     
-    try:
-        pdf_bytes = generate_payslip_pdf(row_dict, selected_month)
-        st.download_button(
-            label=f"📥 {selected_month} の給与明細 (PDF) をダウンロード",
-            data=pdf_bytes,
-            file_name=f"給与明細_{selected_month}_{teacher_name}.pdf",
-            mime="application/pdf",
-            type="primary"
-        )
-    except Exception as e:
-        st.error(f"⚠️ PDFの作成中にエラーが発生しました: {e}")
+    # "単価_" から始まる列（計算用の隠しデータ）を表示から除外する処理
+    cols_to_drop = [c for c in display_df.columns if c.startswith("単価_")]
+    display_df = display_df.drop(columns=cols_to_drop, errors='ignore')
+    
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
+    st.divider()
