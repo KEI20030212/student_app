@@ -75,7 +75,9 @@ def render_test_scores_list_page():
                 return b_name
         return "その他"
 
+    # 生徒マスタに校舎情報を追加（タブ1のベースとして使用するため）
     if not df_students.empty and '生徒名' in df_students.columns and '生徒ID' in df_students.columns:
+        df_students['所属校舎'] = df_students['生徒ID'].apply(assign_branch)
         for _, row in df_students.iterrows():
             s_name = str(row.get('生徒名', ""))
             student_name_to_branch[s_name] = assign_branch(row.get('生徒ID', ""))
@@ -91,9 +93,10 @@ def render_test_scores_list_page():
     # ---------------------------------------------------------
     with tab_test:
         st.write("各テストの成績データを絞り込み、一覧表として確認・ダウンロードできます。")
+        st.caption("※対象の校舎・学年に所属する全生徒がリストアップされます（未入力の場合は空欄になります）")
         
-        if df_tests.empty or "APIエラー発生" in df_tests.columns:
-            st.error("成績データが取得できませんでした。")
+        if df_students.empty:
+            st.error("生徒マスターデータが取得できませんでした。")
         else:
             date_col = '実施日' if '実施日' in df_tests.columns else '日付' if '日付' in df_tests.columns else '日時' if '日時' in df_tests.columns else None
             name_col = '生徒名' if '生徒名' in df_tests.columns else '名前' if '名前' in df_tests.columns else None
@@ -103,21 +106,14 @@ def render_test_scores_list_page():
             if not date_col or not name_col or not type_col:
                 st.error("成績シートに必要な列（日時・生徒名・テスト種別）が見つかりません。")
             else:
-                if not df_students.empty and name_col in df_tests.columns:
-                    df_tests = pd.merge(df_tests, df_students[['生徒名', '学年', '生徒ID']], left_on=name_col, right_on='生徒名', how='left')
-                    df_tests['所属校舎'] = df_tests['生徒ID'].apply(assign_branch)
-                else:
-                    df_tests['学年'] = "不明"
-                    df_tests['所属校舎'] = "すべて"
-
                 with st.container(border=True):
                     st.write("🔍 **絞り込み条件**")
                     c1, c2, c3, c4 = st.columns(4)
                     
-                    branch_options = ["すべて"] + list(df_tests['所属校舎'].dropna().unique())
+                    branch_options = ["すべて"] + list(df_students['所属校舎'].dropna().unique())
                     selected_branch = c1.selectbox("🏫 校舎", branch_options)
                     
-                    grade_options = ["すべて"] + list(df_tests['学年'].dropna().unique())
+                    grade_options = ["すべて"] + list(df_students['学年'].dropna().unique())
                     selected_grade = c2.selectbox("🎯 学年", grade_options)
                     
                     type_options = ["すべて"] + list(df_tests[type_col].dropna().unique())
@@ -140,34 +136,61 @@ def render_test_scores_list_page():
                         max_value=datetime.date(2100, 12, 31)
                     )
 
-                df_filtered = df_tests.copy()
-                if selected_branch != "すべて": df_filtered = df_filtered[df_filtered['所属校舎'] == selected_branch]
-                if selected_grade != "すべて": df_filtered = df_filtered[df_filtered['学年'] == selected_grade]
-                if selected_type != "すべて": df_filtered = df_filtered[df_filtered[type_col] == selected_type]
+                # ==========================================
+                # 🌟 1. 全生徒（マスター）をベースに絞り込む
+                # ==========================================
+                df_base = df_students.copy()
+                if selected_branch != "すべて": df_base = df_base[df_base['所属校舎'] == selected_branch]
+                if selected_grade != "すべて": df_base = df_base[df_base['学年'] == selected_grade]
                 
-                if isinstance(selected_date_range, (tuple, list)):
-                    if len(selected_date_range) == 2:
-                        start_date, end_date = selected_date_range
-                        df_filtered = df_filtered[
-                            (df_filtered[date_col].dt.date >= start_date) & 
-                            (df_filtered[date_col].dt.date <= end_date)
-                        ]
-                    elif len(selected_date_range) == 1:
-                        start_date = selected_date_range[0]
-                        df_filtered = df_filtered[df_filtered[date_col].dt.date == start_date]
-
-                if df_filtered.empty:
-                    st.warning("指定された条件のデータはありません。")
+                # 生徒マスターの列名を整える（結合用に揃える）
+                df_base = df_base[['生徒名', '学年', '所属校舎']].copy()
+                
+                if df_base.empty:
+                    st.warning("指定された校舎・学年に所属する生徒がいません。")
                 else:
-                    df_filtered = df_filtered.sort_values(by=date_col, ascending=False)
-                    df_filtered[date_col] = df_filtered[date_col].dt.strftime('%Y/%m/%d')
+                    # ==========================================
+                    # 🌟 2. 成績データを条件で絞り込む
+                    # ==========================================
+                    df_scores = df_tests.copy()
+                    if selected_type != "すべて": df_scores = df_scores[df_scores[type_col] == selected_type]
+                    
+                    if isinstance(selected_date_range, (tuple, list)):
+                        if len(selected_date_range) == 2:
+                            start_date, end_date = selected_date_range
+                            df_scores = df_scores[
+                                (df_scores[date_col].dt.date >= start_date) & 
+                                (df_scores[date_col].dt.date <= end_date)
+                            ]
+                        elif len(selected_date_range) == 1:
+                            start_date = selected_date_range[0]
+                            df_scores = df_scores[df_scores[date_col].dt.date == start_date]
+                            
+                    # 重複がある場合（同じ生徒が同じ期間に2回同じテストを受けた場合など）最新のものを残す
+                    df_scores = df_scores.sort_values(by=date_col, ascending=False).drop_duplicates(subset=[name_col, type_col])
+                    df_scores[date_col] = df_scores[date_col].dt.strftime('%Y/%m/%d')
 
-                    st.write(f"📊 **検索結果: {len(df_filtered)} 件**")
+                    # ==========================================
+                    # 🌟 3. 全生徒名簿に成績データを結合（Left Join）
+                    # ==========================================
+                    df_merged = pd.merge(df_base, df_scores, left_on='生徒名', right_on=name_col, how='left')
                     
-                    base_cols = [date_col, '所属校舎', '学年', name_col, type_col]
-                    if test_name_col: base_cols.append(test_name_col)
+                    # 結合後に不要な重複列（name_col）を消し、共通列を整備
+                    if name_col != '生徒名' and name_col in df_merged.columns:
+                        df_merged = df_merged.drop(columns=[name_col])
+                        
+                    # 未入力者の日付や種別は検索条件のものを仮置きする
+                    df_merged[date_col] = df_merged[date_col].fillna('-')
+                    if selected_type != "すべて": df_merged[type_col] = df_merged[type_col].fillna(selected_type)
+
+                    st.write(f"📊 **対象生徒数: {len(df_merged)} 名**")
                     
-                    all_possible_score_cols = [col for col in df_tests.columns if col not in base_cols and col not in ['生徒ID', '生徒名']]
+                    base_cols = [date_col, '所属校舎', '学年', '生徒名', type_col]
+                    if test_name_col: 
+                        df_merged[test_name_col] = df_merged[test_name_col].fillna('-')
+                        base_cols.append(test_name_col)
+                    
+                    all_possible_score_cols = [col for col in df_tests.columns if col not in [date_col, type_col, test_name_col, name_col, '所属校舎', '学年', '生徒ID']]
                     
                     default_selected_cols = ['英語', '数学', '国語', '理科', '社会', '総合', '保体', '技術', '家庭', '美術', '音楽', '9科総合']
                     actual_default_cols = [col for col in default_selected_cols if col in all_possible_score_cols]
@@ -180,9 +203,14 @@ def render_test_scores_list_page():
                     
                     display_cols = base_cols + selected_score_cols
                     
-                    df_display = df_filtered[display_cols].copy()
+                    # 必要な列だけを抽出し、欠損値（未入力）をハイフンに置き換え
+                    df_display = df_merged[display_cols].copy()
+                    
                     for col in df_display.columns:
                         df_display[col] = df_display[col].astype(str).replace(['nan', 'None', '<NA>'], '-')
+
+                    # 学年、生徒名で並び替え
+                    df_display = df_display.sort_values(by=['学年', '生徒名'], ascending=[True, True])
 
                     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
@@ -192,7 +220,7 @@ def render_test_scores_list_page():
                     
                     safe_branch = re.sub(r'[\\/:*?"<>|]', '_', selected_branch)
                     safe_type = re.sub(r'[\\/:*?"<>|]', '_', selected_type)
-                    file_name = f"{safe_branch}_{safe_type}_成績一覧.xlsx"
+                    file_name = f"{safe_branch}_{safe_type}_成績一覧(全生徒).xlsx"
 
                     st.write("")
                     st.download_button(
