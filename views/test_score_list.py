@@ -236,6 +236,7 @@ def render_test_scores_list_page():
     # ---------------------------------------------------------
     with tab_quiz:
         st.write("生徒の進捗・定着度マップを校舎ごとに確認・ダウンロードできます✨")
+        st.caption("※その校舎に所属する「全生徒」が表示されます。ダウンロードしたExcelファイルはそのまま管理シートとしてお使いいただけます。")
 
         if df_all_quizzes.empty or "APIエラー発生" in df_all_quizzes.columns:
             st.info("小テストの記録がまだありません。")
@@ -266,7 +267,7 @@ def render_test_scores_list_page():
                 # 権限がある管理者なら誰でも保存可能
                 user_role = str(st.session_state.get('role', st.session_state.get('user_role', 'guest'))).lower()
                 if user_role in ['admin', 'owner', 'am']:
-                    if st.button("💾 この選択をデフォルト保存", use_container_width=True, help="次回開いた時もこのテストが自動表示されます"):
+                    if st.button("💾 この選択をデフォルト保存", use_container_width=True):
                         with st.spinner("設定シートを更新中..."):
                             success = robust_api_call(update_quiz_master_defaults, selected_quizzes_for_map, fallback_value=False)
                             if success:
@@ -283,9 +284,7 @@ def render_test_scores_list_page():
                     nums = re.findall(r'\d+', str(c))
                     return int(nums[0]) if nums else 999
                     
-                # 🌟 NEW: マスターデータを基に横軸を完全展開する関数
                 def fill_all_chapters(pivot_df, target_q_name):
-                    # 🐛 エラー対策：列名を強制的に文字列にして重複を防ぐ
                     pivot_df.columns = [str(c) for c in pivot_df.columns]
                     pivot_df = pivot_df.loc[:, ~pivot_df.columns.duplicated()].copy()
                     
@@ -293,15 +292,12 @@ def render_test_scores_list_page():
                     if not t_master:
                         return pivot_df 
                         
-                    # マスターにある全単元のリストを作成
                     all_chaps = [str(k) for k in t_master.keys()]
                     
-                    # pivot_dfに存在しない単元列を追加（中身は空っぽ）
                     for chap in all_chaps:
                         if chap not in pivot_df.columns:
                             pivot_df[chap] = ""
                             
-                    # 並び替え（マスター順 ＋ マスターにない謎の単元は後ろ）
                     sorted_cols = sorted(all_chaps, key=sort_key)
                     other_cols = [c for c in pivot_df.columns if c not in all_chaps]
                     final_cols = sorted_cols + sorted(other_cols, key=sort_key)
@@ -309,7 +305,6 @@ def render_test_scores_list_page():
                     return pivot_df[final_cols]
 
                 def style_pivot_dataframe(pivot_df, target_q_name):
-                    # 🌟 全単元を横軸に展開する
                     pivot_df = fill_all_chapters(pivot_df, target_q_name)
                     
                     col_mapping = {}
@@ -344,7 +339,6 @@ def render_test_scores_list_page():
                             return str(val)
 
                     styled_display = pivot_df.copy()
-                    # 重複がないか念のためチェック
                     styled_display = styled_display.loc[:, ~styled_display.columns.duplicated()].copy()
                     
                     for col in styled_display.columns:
@@ -366,22 +360,25 @@ def render_test_scores_list_page():
                     st.markdown(f"### 🎯 【 {selected_quiz_for_map} 】の進捗マップ")
                     
                     df_q = df_all_quizzes[df_all_quizzes['テキスト'] == selected_quiz_for_map].copy()
-                    df_q['点数'] = pd.to_numeric(df_q['点数'], errors='coerce')
-                    df_q = df_q.dropna(subset=['点数']).copy()
-                    
-                    if df_q.empty:
-                        st.info(f"【{selected_quiz_for_map}】の有効な点数記録がありません。")
-                        st.divider()
-                        continue
+                    if not df_q.empty:
+                        df_q['点数'] = pd.to_numeric(df_q['点数'], errors='coerce')
                         
-                    df_q['校舎'] = df_q['名前'].map(lambda x: student_name_to_branch.get(x, "その他"))
+                        # 🌟 日時を安全なカレンダー（datetime）型にしておく！
+                        if '日時' in df_q.columns:
+                            df_q['日時'] = pd.to_datetime(df_q['日時'], errors='coerce')
+                            # タイムゾーン情報がついている場合は削除（比較時のエラーを防止）
+                            if df_q['日時'].dt.tz is not None:
+                                df_q['日時'] = df_q['日時'].dt.tz_localize(None)
+
+                        df_q = df_q.dropna(subset=['点数']).copy()
+                        df_q['校舎'] = df_q['名前'].map(lambda x: student_name_to_branch.get(x, "その他"))
                     
-                    # 🌟 動的に生成した校舎リストを使ってタブを作成
+                    # 🌟 成績の有無に関わらず、「生徒が在籍している校舎」のタブをすべて作成する
                     branch_order = list(branch_dict.values()) + ["体験授業", "その他"]
-                    available_branches = [b for b in branch_order if b in df_q['校舎'].unique()]
+                    available_branches = [b for b in branch_order if b in student_name_to_branch.values()]
                     
                     if not available_branches:
-                        st.info("表示できる校舎データがありません。")
+                        st.info("生徒データが登録されていません。")
                         st.divider()
                         continue
 
@@ -389,19 +386,50 @@ def render_test_scores_list_page():
                     
                     for idx, branch in enumerate(available_branches):
                         with map_tabs[idx]:
-                            df_branch = df_q[df_q['校舎'] == branch].copy()
+                            # 🌟 1. その校舎の全生徒のリスト（名簿）を作成
+                            branch_students = [s for s, b in student_name_to_branch.items() if b == branch]
                             
-                            best_scores_all = df_branch.groupby(['名前', '単元'])['点数'].max().reset_index()
-                            pivot_all = best_scores_all.pivot_table(
-                                index='名前',
-                                columns='単元',
-                                values='点数',
-                                aggfunc='max'
-                            )
+                            df_branch = df_q[df_q['校舎'] == branch].copy() if not df_q.empty else pd.DataFrame()
+                            
+                            # 🌟 2. 【新規挑戦回数】の計算（過去1週間での「初」挑戦数）
+                            new_challenge_counts = {}
+                            if not df_branch.empty and '日時' in df_branch.columns:
+                                # 生徒名・単元ごとに「最初の受験記録（一番古い日時）」だけを残す
+                                first_attempts = df_branch.sort_values('日時').drop_duplicates(subset=['名前', '単元'], keep='first').copy()
+                                
+                                # 型エラー回避用：念のためもう一度型を揃える
+                                first_attempts['日時'] = pd.to_datetime(first_attempts['日時'], errors='coerce')
+                                if first_attempts['日時'].dt.tz is not None:
+                                    first_attempts['日時'] = first_attempts['日時'].dt.tz_localize(None)
+                                
+                                # 今日からちょうど7日前の日付（時刻は無視）
+                                today_naive = pd.Timestamp.now(tz='Asia/Tokyo').tz_localize(None).normalize()
+                                one_week_ago = today_naive - pd.Timedelta(days=7)
+                                
+                                # 最初の受験が直近1週間以内のものだけを抽出して、生徒ごとにカウント！
+                                recent_first = first_attempts[first_attempts['日時'] >= one_week_ago]
+                                new_challenge_counts = recent_first.groupby('名前').size().to_dict()
+                            
+                            # 3. 点数のピボットテーブル作成（自己ベストの抽出）
+                            if not df_branch.empty:
+                                best_scores_all = df_branch.groupby(['名前', '単元'])['点数'].max().reset_index()
+                                pivot_all = best_scores_all.pivot_table(
+                                    index='名前',
+                                    columns='単元',
+                                    values='点数',
+                                    aggfunc='max'
+                                )
+                            else:
+                                pivot_all = pd.DataFrame()
+                            
+                            # 🌟 4. 全生徒を強制的にインデックスに追加（これで未受験者も表示される！）
+                            pivot_all = pivot_all.reindex(branch_students)
                             
                             if not pivot_all.empty:
                                 pivot_all = pivot_all.reset_index()
                                 pivot_all['学年'] = pivot_all['名前'].map(lambda x: student_name_to_grade.get(x, "未設定"))
+                                # さきほど計算した新規挑戦回数をマッピング（ない人は0回）
+                                pivot_all['新規挑戦回数'] = pivot_all['名前'].map(lambda x: new_challenge_counts.get(x, 0))
                                 
                                 def get_grade_rank(g_str):
                                     mapping = {
@@ -416,14 +444,17 @@ def render_test_scores_list_page():
                                 pivot_all['学年_ソート'] = pivot_all['学年'].apply(get_grade_rank)
                                 pivot_all = pivot_all.sort_values(by=['学年_ソート', '名前'])
                                 pivot_all = pivot_all.drop(columns=['学年_ソート'])
-                                pivot_all = pivot_all.set_index(['学年', '名前'])
+                                
+                                # 🌟 5. インデックスを【新規挑戦回数】【学年】【名前】の順番にセットする！
+                                pivot_all = pivot_all.set_index(['新規挑戦回数', '学年', '名前'])
                                 
                                 styled_all_df = style_pivot_dataframe(pivot_all, selected_quiz_for_map)
                                 st.dataframe(styled_all_df, use_container_width=True)
                                 
                                 excel_buffer_map = io.BytesIO()
                                 with pd.ExcelWriter(excel_buffer_map, engine='xlsxwriter') as writer:
-                                    styled_all_df.to_excel(writer, sheet_name=branch)
+                                    # 🌟 修正ポイント: merge_cells=False を指定してセル結合を解除！
+                                    styled_all_df.to_excel(writer, sheet_name=branch, merge_cells=False)
                                 
                                 excel_data_map = excel_buffer_map.getvalue()
                                 safe_file_name_map = re.sub(r'[\\/:*?"<>|]', '_', selected_quiz_for_map)
@@ -439,5 +470,5 @@ def render_test_scores_list_page():
                                     key=f"dl_map_{branch}_{selected_quiz_for_map}"
                                 )
                             else:
-                                st.info(f"この小テストを受けた {branch} の生徒はいません。")
+                                st.info(f"この校舎には生徒がいません。")
                     st.divider()
