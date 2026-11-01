@@ -11,3 +11,4 @@ plotly
 google-api-python-client
 google-generativeai
 xlsxwriter
+openpyxl
