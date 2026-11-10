@@ -333,7 +333,7 @@ def render_test_scores_list_page():
                             ratio = v / full_m if full_m > 0 else 0
                             if ratio >= 1.0: return f"👑 {int(v)}"
                             elif ratio >= 0.85: return f"🟢 {int(v)}"
-                            elif ratio >= 0.2: return f"🟡 {int(v)}"
+                            elif ratio >= 0.6: return f"🟡 {int(v)}"
                             else: return f"🔴 {int(v)}"
                         except:
                             return str(val)
@@ -345,7 +345,7 @@ def render_test_scores_list_page():
                         styled_display[col] = styled_display[col].apply(add_icon)
 
                     def color_bg(v):
-                        if "👑" in str(v): return 'background-color: #fffacd; color: #000; font-weight: bold;'
+                        if "👑" in str(v): return 'background-color: #87ceeb; color: #000; font-weight: bold;'
                         if "🟢" in str(v): return 'background-color: #c6efce; color: #006100;'
                         if "🟡" in str(v): return 'background-color: #ffeb9c; color: #9c6500;'
                         if "🔴" in str(v): return 'background-color: #ffc7ce; color: #9c0006;'
